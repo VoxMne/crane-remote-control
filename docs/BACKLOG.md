@@ -21,13 +21,14 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       sim test: step demand → position converges, respects limits
 
 ## M2 — Operator UI (branch `feature/ui-shell`)
-- [ ] TODO — HMI layout: left control panel, center visualization canvas, right status panel
-- [ ] TODO — Per-axis control widgets (slider springs back to 0 on release) + keyboard map
+- [x] DONE — HMI layout: left control panel, center visualization canvas, right status panel
+- [x] DONE — Per-axis control widgets (slider springs back to 0 on release) + keyboard map
       (Q/A slew, W/S boom, E/D jib, R/F extension, T/G winch), Space = deadman hold-to-run
-- [ ] TODO — Big E-STOP button (latching) + Reset button
-- [ ] TODO — CraneRenderer interface + 2D schematic renderer (side view + top slew view)
-- [ ] TODO — Status panel: positions, safety flags, alarms; driver + profile display
-- [ ] TODO — Runs against a stub state supplier (integration replaces it)
+- [x] DONE — Big E-STOP button (latching) + Reset button
+- [x] DONE — CraneRenderer interface + 2D schematic renderer (side view + top slew view)
+- [x] DONE — Status panel: positions, safety flags, alarms; driver + profile display
+- [x] DONE — Runs against a stub state supplier (integration replaces it):
+      CraneBackend seam + throwaway StubCraneBackend in com.vukotic.crane.ui.backend
 
 ## M2b — Integration (on `main`, after merging both branches)
 - [ ] TODO — Merge feature/core-sim + feature/ui-shell
