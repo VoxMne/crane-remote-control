@@ -12,7 +12,18 @@ crane back-end (v1: built-in simulator; later: real hardware via serial/CAN driv
 ./gradlew :crane-ui:run              # launch the desktop app
 ./gradlew build                      # compile + run all tests
 ./gradlew :crane-ui:jpackageImage    # self-contained Windows app (no Java needed)
+./gradlew :crane-ui:jpackage         # Windows .msi installer (WiX on PATH, see below)
 ```
+
+For the `.msi`, WiX 3.14 binaries must be on the PATH. This repo keeps them locally
+(gitignored) — from PowerShell:
+
+```powershell
+$env:Path = "$pwd\tools\wix314;$env:Path"; .\gradlew.bat :crane-ui:jpackage
+```
+
+(If `tools/wix314` is missing, download `wix314-binaries.zip` from the official
+wixtoolset/wix3 GitHub releases and extract it there.)
 
 Requires JDK 21 (the Gradle wrapper handles everything else).
 

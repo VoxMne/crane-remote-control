@@ -76,8 +76,9 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [ ] TODO — Both views draw load sway when "loadSway" is present in state (default 0)
 
 ## M4d — MSI installer (on main)
-- [ ] DOING — WiX 3.14 binaries under tools/, jpackage MSI (appVersion 1.x rule),
-      README instructions
+- [x] DONE — WiX 3.14 binaries under tools/ (gitignored), jpackage MSI
+      (CraneRemoteControl-1.0.0.msi, ~42 MB, per-user install with Start-menu
+      shortcut; appVersion 1.x because MSI rejects a leading 0), README instructions
 
 ## M4e — Integration (on main, after merges)
 - [ ] TODO — UI: ASSIST panel (smoothing + anti-sway toggles), FOLD TO TRANSPORT button
