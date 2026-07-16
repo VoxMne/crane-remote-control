@@ -11,13 +11,13 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — minimal JavaFX window in crane-ui
 
 ## M1 — Core & simulator (branch `feature/core-sim`)
-- [ ] TODO — SafetyController: E-STOP latch + reset rules, deadman, clamp, per-axis ramp
+- [x] DONE — SafetyController: E-STOP latch + reset rules, deadman, clamp, per-axis ramp
       limiting, watchdog (250 ms default) — semantics in docs/ARCHITECTURE.md §Safety
-- [ ] TODO — ControlLoop: fixed-tick (50 Hz) scheduler; samples latest CraneCommand,
+- [x] DONE — ControlLoop: fixed-tick (50 Hz) scheduler; samples latest CraneCommand,
       runs safety, calls driver, publishes CraneState
-- [ ] TODO — SimulatedCraneDriver (crane-sim): per-axis first-order velocity response
+- [x] DONE — SimulatedCraneDriver (crane-sim): per-axis first-order velocity response
       (time constant per axis), integrate positions, hard stop at limits
-- [ ] TODO — JUnit tests: every rule in ARCHITECTURE §Safety gets at least one test;
+- [x] DONE — JUnit tests: every rule in ARCHITECTURE §Safety gets at least one test;
       sim test: step demand → position converges, respects limits
 
 ## M2 — Operator UI (branch `feature/ui-shell`)
