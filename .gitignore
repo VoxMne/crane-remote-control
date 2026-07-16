@@ -19,3 +19,6 @@ Desktop.ini
 
 # Agent worktrees (never commit nested checkouts)
 .worktrees/
+
+# Runtime artifacts
+telemetry/

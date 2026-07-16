@@ -1,0 +1,21 @@
+{
+  "id": "heavy-5",
+  "name": "Heavy Knuckle-Boom (5-axis)",
+  "axes": [
+    { "id": "slew", "label": "Slew (rotation)", "unit": "deg",
+      "minPosition": -180, "maxPosition": 180,
+      "maxVelocity": 8, "commandRampRate": 1.2 },
+    { "id": "boom", "label": "Main boom", "unit": "deg",
+      "minPosition": -10, "maxPosition": 80,
+      "maxVelocity": 5, "commandRampRate": 1.2 },
+    { "id": "jib", "label": "Jib (knuckle)", "unit": "deg",
+      "minPosition": 0, "maxPosition": 165,
+      "maxVelocity": 7, "commandRampRate": 1.2 },
+    { "id": "extension", "label": "Boom extension", "unit": "m",
+      "minPosition": 0, "maxPosition": 12,
+      "maxVelocity": 0.4, "commandRampRate": 1.2 },
+    { "id": "winch", "label": "Winch (rope out)", "unit": "m",
+      "minPosition": 0, "maxPosition": 30,
+      "maxVelocity": 1.2, "commandRampRate": 1.2 }
+  ]
+}

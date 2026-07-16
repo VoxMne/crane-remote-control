@@ -34,15 +34,18 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — Merge feature/core-sim + feature/ui-shell
 - [x] DONE — Wire UI → ControlLoop → SimulatedCraneDriver → CraneState → renderer
       (ControlLoopBackend adapter; throwaway StubCraneBackend deleted)
-- [ ] DOING — Manual drive test (all axes, deadman, E-STOP, watchdog) — app launched,
-      awaiting operator feedback
+- [x] DONE — Manual drive test (all axes, deadman, E-STOP, watchdog) — operator confirmed
 
 ## M3 — Universality & polish
-- [ ] TODO — JSON crane profiles + loader (Jackson); 2 bundled profiles
-- [ ] TODO — Alarm framework (limit reached, watchdog trip, E-STOP events)
-- [ ] TODO — Telemetry logging to CSV
-- [ ] TODO — Dark HMI theme polish
-- [ ] TODO — jpackage Windows installer
+- [x] DONE — JSON crane profiles + CraneProfileLoader (Jackson, strict validation);
+      2 bundled profiles (compact-3, heavy-5) + user profiles from ./profiles/*.json;
+      runtime profile switching rebuilds the whole cockpit (ProfileCatalog + ComboBox)
+- [x] DONE — Alarms: active list + timestamped history (last 100) in status panel
+- [x] DONE — TelemetryCsvLogger (crane-core) + REC toggle in UI → telemetry/*.csv
+- [x] DONE — Dark HMI theme via hmi.css (-fx-base derived controls, amber accent)
+- [x] DONE — jpackage app-image: `gradlew :crane-ui:jpackageImage` →
+      build/jpackage/CraneRemoteControl/ (56 MB, no Java needed). MSI installer
+      deferred: requires WiX Toolset on the build machine
 
 ## M4 — Later (not scheduled)
 - [ ] gamepad input · PROTOCOL.md + serial driver · 3D view · anti-sway · fold-to-transport

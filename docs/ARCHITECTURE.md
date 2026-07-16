@@ -50,6 +50,20 @@ All types in `com.vukotic.crane.core.model` / `...core.driver`:
 - UI never mutates state directly — it only produces `CraneCommand`s for the ControlLoop
   and renders the `CraneState` the loop publishes.
 
+## Profiles & telemetry (M3)
+- `CraneProfileLoader` (core, Jackson): JSON → `CraneProfile` with strict validation
+  (unknown fields rejected; record constructor rules surface as `ProfileLoadException`).
+- `ProfileCatalog` (ui): built-in demo + bundled `/profiles/*.json` resources + any
+  `profiles/*.json` directory next to the app — new cranes are data, never code.
+  Switching profiles tears down the session (backend, telemetry) and rebuilds the cockpit.
+- `TelemetryCsvLogger` (core): a control-loop state listener writing one CSV row per tick
+  (Locale.ROOT numbers); UI REC toggle writes `telemetry/telemetry-<profile>-<stamp>.csv`.
+
+## Packaging
+`gradlew :crane-ui:jpackageImage` (badass-runtime plugin): jlink'ed JRE + app classpath
+→ self-contained `build/jpackage/CraneRemoteControl/`. Main class is the non-Application
+`Launcher` (classpath JavaFX rule). MSI installer needs WiX Toolset installed.
+
 ## Threading
 ControlLoop runs on its own scheduled thread at fixed tick; UI reads the latest published
 `CraneState` via `javafx.application.Platform.runLater` or an `AnimationTimer` polling an

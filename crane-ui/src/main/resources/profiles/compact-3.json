@@ -1,0 +1,15 @@
+{
+  "id": "compact-3",
+  "name": "Compact Loader (3-axis)",
+  "axes": [
+    { "id": "slew", "label": "Slew (rotation)", "unit": "deg",
+      "minPosition": -135, "maxPosition": 135,
+      "maxVelocity": 10, "commandRampRate": 1.5 },
+    { "id": "boom", "label": "Main boom", "unit": "deg",
+      "minPosition": 0, "maxPosition": 70,
+      "maxVelocity": 6, "commandRampRate": 1.5 },
+    { "id": "winch", "label": "Winch (rope out)", "unit": "m",
+      "minPosition": 0, "maxPosition": 12,
+      "maxVelocity": 0.8, "commandRampRate": 1.5 }
+  ]
+}

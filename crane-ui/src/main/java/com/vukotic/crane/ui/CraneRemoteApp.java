@@ -3,11 +3,10 @@ package com.vukotic.crane.ui;
 import com.vukotic.crane.core.model.AxisSpec;
 import com.vukotic.crane.core.model.CraneCommand;
 import com.vukotic.crane.core.model.CraneProfile;
-import com.vukotic.crane.core.model.CraneProfiles;
 import com.vukotic.crane.core.model.CraneState;
+import com.vukotic.crane.core.telemetry.TelemetryCsvLogger;
 import com.vukotic.crane.sim.SimulatedCraneDriver;
 import com.vukotic.crane.ui.backend.ControlLoopBackend;
-import com.vukotic.crane.ui.backend.CraneBackend;
 import com.vukotic.crane.ui.input.KeyBindings;
 import com.vukotic.crane.ui.input.OperatorInput;
 import com.vukotic.crane.ui.render.CraneRenderer;
@@ -21,6 +20,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -36,21 +36,31 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.stage.Stage;
+import javafx.util.StringConverter;
 
+import java.io.IOException;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
+import java.util.Set;
 
 /**
- * Operator HMI (M2a): dark industrial shell with a per-axis control panel,
+ * Operator HMI: dark industrial cockpit with a per-axis control panel,
  * schematic visualization canvas, and status panel.
  *
  * <p>Every frame, an {@link AnimationTimer} snapshots {@link OperatorInput}
- * into a {@link CraneCommand} and pushes it into {@code commandSink}; the
- * latest {@link CraneState} is polled from the {@link CraneBackend} and
- * rendered. The backend is the single integration seam: today it is the
- * throwaway {@link StubCraneBackend}, at M2b it becomes an adapter over the
- * real ControlLoop without any other UI change.
+ * into a {@link CraneCommand} for the backend and renders the latest
+ * {@link CraneState}. The {@link ControlLoopBackend} (real 50 Hz control loop +
+ * safety layer over the simulator driver) is the single integration seam.
+ *
+ * <p>Universality (M3): the profile selector rebuilds the whole cockpit for any
+ * {@link CraneProfile} from {@link ProfileCatalog} — controls, readouts and
+ * visualization all derive from profile data. Telemetry can be recorded to CSV
+ * with the REC toggle.
  */
 public final class CraneRemoteApp extends Application {
 
@@ -64,42 +74,51 @@ public final class CraneRemoteApp extends Application {
     private static final String TEXT_DIM = "#9aa7b0";
     private static final Color LAMP_OFF = Color.web("#39434c");
 
-    private final CraneProfile profile = CraneProfiles.demoKnuckleBoom();
+    private static final DateTimeFormatter FILE_STAMP =
+            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static final DateTimeFormatter ALARM_STAMP =
+            DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final int ALARM_HISTORY_LIMIT = 100;
+
     private final KeyBindings keyBindings = KeyBindings.defaults();
-    private final OperatorInput operatorInput = new OperatorInput(keyBindings, profile.axisIds());
-
-    /** The ONLY place that decides what runs the crane (see class Javadoc). */
-    private final ControlLoopBackend controlBackend =
-            new ControlLoopBackend(profile, new SimulatedCraneDriver());
-    private final CraneBackend backend = controlBackend;
-    private final Consumer<CraneCommand> commandSink = backend::submitCommand;
-
     private final CraneRenderer renderer = new SchematicRenderer2D();
+    private final List<CraneProfile> catalog = ProfileCatalog.available();
+
+    // ---- per-profile session, rebuilt by activateProfile() ----
+    private CraneProfile profile;
+    private OperatorInput operatorInput;
+    private ControlLoopBackend backend;
 
     private final Map<String, Label> demandReadouts = new HashMap<>();
     private final Map<String, Label> positionReadouts = new HashMap<>();
     private final ObservableList<String> alarmItems = FXCollections.observableArrayList();
+    private final ObservableList<String> alarmHistory = FXCollections.observableArrayList();
+    private Set<String> previousAlarms = Set.of();
+
+    private BorderPane root;
     private ToggleButton estopButton;
     private Label deadmanIndicator;
     private Circle estopLamp;
     private Circle deadmanLamp;
     private Circle watchdogLamp;
+    private ToggleButton recordButton;
+    private Label recordInfo;
     private Canvas canvas;
     private AnimationTimer frameTimer;
+    private TelemetryCsvLogger telemetryLogger;
 
     @Override
     public void start(Stage stage) {
-        BorderPane root = new BorderPane();
+        root = new BorderPane();
         root.setStyle("-fx-background-color: " + BG + ";");
-        root.setLeft(buildControlPanel());
         root.setCenter(buildCanvasPane());
-        root.setRight(buildStatusPanel());
-        BorderPane.setMargin(root.getLeft(), new Insets(10, 0, 10, 10));
         BorderPane.setMargin(root.getCenter(), new Insets(10));
-        BorderPane.setMargin(root.getRight(), new Insets(10, 10, 10, 0));
 
         Scene scene = new Scene(root, 1280, 800);
+        scene.getStylesheets().add(getClass().getResource("/hmi.css").toExternalForm());
         installKeyHandlers(scene);
+
+        activateProfile(catalog.get(0));
 
         stage.setTitle("Crane Remote Control");
         stage.setMinWidth(1000);
@@ -107,12 +126,11 @@ public final class CraneRemoteApp extends Application {
         stage.setScene(scene);
         stage.show();
 
-        controlBackend.start();
         frameTimer = new AnimationTimer() {
             @Override
             public void handle(long frameNanos) {
                 CraneCommand command = operatorInput.snapshot(System.currentTimeMillis());
-                commandSink.accept(command);
+                backend.submitCommand(command);
                 CraneState state = backend.latestState();
                 updateReadouts(command, state);
                 renderer.render(canvas.getGraphicsContext2D(),
@@ -127,7 +145,38 @@ public final class CraneRemoteApp extends Application {
         if (frameTimer != null) {
             frameTimer.stop();
         }
-        controlBackend.stop();
+        stopTelemetry();
+        if (backend != null) {
+            backend.stop();
+        }
+    }
+
+    /**
+     * Tears down the running session (backend, telemetry, panels) and rebuilds
+     * the whole cockpit for the given profile. Runs on the FX thread; the frame
+     * timer runs on the same thread, so no torn state is ever rendered.
+     */
+    private void activateProfile(CraneProfile newProfile) {
+        stopTelemetry();
+        if (backend != null) {
+            backend.stop();
+        }
+
+        profile = newProfile;
+        operatorInput = new OperatorInput(keyBindings, profile.axisIds());
+        backend = new ControlLoopBackend(profile, new SimulatedCraneDriver());
+
+        demandReadouts.clear();
+        positionReadouts.clear();
+        alarmItems.clear();
+        previousAlarms = Set.of();
+
+        root.setLeft(buildControlPanel());
+        root.setRight(buildStatusPanel());
+        BorderPane.setMargin(root.getLeft(), new Insets(10, 0, 10, 10));
+        BorderPane.setMargin(root.getRight(), new Insets(10, 10, 10, 0));
+
+        backend.start();
     }
 
     // ---- left: controls ----
@@ -222,9 +271,9 @@ public final class CraneRemoteApp extends Application {
         panel.setPrefWidth(320);
         panel.setStyle("-fx-background-color: " + PANEL_BG + "; -fx-background-radius: 6;");
 
-        panel.getChildren().add(sectionLabel("STATUS"));
-        panel.getChildren().add(infoRow("PROFILE", profile.name()));
-        panel.getChildren().add(infoRow("DRIVER", controlBackend.driverName()));
+        panel.getChildren().add(sectionLabel("PROFILE"));
+        panel.getChildren().add(buildProfileSelector());
+        panel.getChildren().add(infoRow("DRIVER", backend.driverName()));
 
         panel.getChildren().add(sectionLabel("AXIS POSITIONS"));
         for (AxisSpec axis : profile.axes()) {
@@ -249,23 +298,112 @@ public final class CraneRemoteApp extends Application {
         panel.getChildren().add(lampRow(deadmanLamp, "DEADMAN HELD"));
         panel.getChildren().add(lampRow(watchdogLamp, "WATCHDOG TRIPPED"));
 
-        panel.getChildren().add(sectionLabel("ALARMS"));
-        ListView<String> alarmList = new ListView<>(alarmItems);
-        alarmList.setFocusTraversable(false);
-        alarmList.setStyle("-fx-background-color: " + BG + "; -fx-control-inner-background: " + BG + ";"
+        panel.getChildren().add(sectionLabel("TELEMETRY"));
+        recordButton = new ToggleButton("REC");
+        recordButton.setFocusTraversable(false);
+        recordButton.setMaxWidth(Double.MAX_VALUE);
+        recordButton.setStyle(recStyle(false));
+        recordButton.selectedProperty().addListener((obs, was, selected) -> {
+            recordButton.setStyle(recStyle(selected));
+            if (selected) {
+                startTelemetry();
+            } else {
+                stopTelemetry();
+            }
+        });
+        recordInfo = new Label("not recording");
+        recordInfo.setWrapText(true);
+        recordInfo.setStyle("-fx-text-fill: " + TEXT_DIM + "; -fx-font-size: 11px;");
+        panel.getChildren().addAll(recordButton, recordInfo);
+
+        panel.getChildren().add(sectionLabel("ACTIVE ALARMS"));
+        ListView<String> alarmList = alarmListView(alarmItems, ALARM_RED);
+        alarmList.setPrefHeight(90);
+        panel.getChildren().add(alarmList);
+
+        panel.getChildren().add(sectionLabel("ALARM HISTORY"));
+        ListView<String> historyList = alarmListView(alarmHistory, TEXT_DIM);
+        VBox.setVgrow(historyList, Priority.ALWAYS);
+        panel.getChildren().add(historyList);
+        return panel;
+    }
+
+    private ComboBox<CraneProfile> buildProfileSelector() {
+        ComboBox<CraneProfile> box = new ComboBox<>(FXCollections.observableArrayList(catalog));
+        box.setMaxWidth(Double.MAX_VALUE);
+        box.setFocusTraversable(false);
+        box.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(CraneProfile p) {
+                return p == null ? "" : p.name();
+            }
+
+            @Override
+            public CraneProfile fromString(String s) {
+                throw new UnsupportedOperationException();
+            }
+        });
+        box.setValue(profile);
+        // Wired after setValue so the initial selection cannot re-trigger a rebuild.
+        box.setOnAction(event -> {
+            CraneProfile selected = box.getValue();
+            if (selected != null && !selected.id().equals(profile.id())) {
+                activateProfile(selected);
+            }
+        });
+        return box;
+    }
+
+    private ListView<String> alarmListView(ObservableList<String> items, String textColor) {
+        ListView<String> list = new ListView<>(items);
+        list.setFocusTraversable(false);
+        list.setStyle("-fx-background-color: " + BG + "; -fx-control-inner-background: " + BG + ";"
                 + " -fx-control-inner-background-alt: " + BG + "; -fx-background-radius: 4;");
-        alarmList.setCellFactory(view -> new ListCell<>() {
+        list.setCellFactory(view -> new ListCell<>() {
             @Override
             protected void updateItem(String item, boolean empty) {
                 super.updateItem(item, empty);
                 setText(empty ? null : item);
-                setStyle("-fx-background-color: transparent; -fx-text-fill: " + ALARM_RED + ";"
+                setStyle("-fx-background-color: transparent; -fx-text-fill: " + textColor + ";"
                         + " -fx-font-size: 12px;");
             }
         });
-        VBox.setVgrow(alarmList, Priority.ALWAYS);
-        panel.getChildren().add(alarmList);
-        return panel;
+        return list;
+    }
+
+    // ---- telemetry ----
+
+    private void startTelemetry() {
+        Path file = Path.of("telemetry", "telemetry-%s-%s.csv"
+                .formatted(profile.id(), LocalDateTime.now().format(FILE_STAMP)));
+        try {
+            telemetryLogger = new TelemetryCsvLogger(file, profile);
+            backend.addStateListener(telemetryLogger);
+            recordInfo.setText("recording → " + file);
+        } catch (IOException e) {
+            telemetryLogger = null;
+            recordInfo.setText("cannot record: " + e.getMessage());
+            recordButton.setSelected(false);
+        }
+    }
+
+    private void stopTelemetry() {
+        if (telemetryLogger == null) {
+            return;
+        }
+        backend.removeStateListener(telemetryLogger);
+        try {
+            telemetryLogger.close();
+        } catch (IOException e) {
+            System.err.println("[telemetry] close failed: " + e.getMessage());
+        }
+        telemetryLogger = null;
+        if (recordInfo != null) {
+            recordInfo.setText("not recording");
+        }
+        if (recordButton != null && recordButton.isSelected()) {
+            recordButton.setSelected(false); // re-entry is a no-op: logger is already null
+        }
     }
 
     // ---- input wiring ----
@@ -303,9 +441,24 @@ public final class CraneRemoteApp extends Application {
         watchdogLamp.setFill(state.watchdogTripped() ? Color.web(ALARM_RED) : LAMP_OFF);
         deadmanIndicator.setStyle(deadmanStyle(operatorInput.deadmanHeld()));
         deadmanIndicator.setText(operatorInput.deadmanHeld() ? "RUN ENABLED" : "HOLD SPACE TO RUN");
+
         if (!alarmItems.equals(state.activeAlarms())) {
             alarmItems.setAll(state.activeAlarms());
         }
+        recordAlarmHistory(state);
+    }
+
+    /** Prepends newly raised alarms (with a time stamp) to the history, capped. */
+    private void recordAlarmHistory(CraneState state) {
+        for (String alarm : state.activeAlarms()) {
+            if (!previousAlarms.contains(alarm)) {
+                alarmHistory.add(0, LocalTime.now().format(ALARM_STAMP) + "  " + alarm);
+            }
+        }
+        if (alarmHistory.size() > ALARM_HISTORY_LIMIT) {
+            alarmHistory.remove(ALARM_HISTORY_LIMIT, alarmHistory.size());
+        }
+        previousAlarms = Set.copyOf(state.activeAlarms());
     }
 
     // ---- style helpers ----
@@ -357,6 +510,13 @@ public final class CraneRemoteApp extends Application {
         }
         return "-fx-background-color: " + BG + "; -fx-text-fill: " + TEXT_DIM + ";"
                 + " -fx-background-radius: 6; -fx-font-size: 13px;";
+    }
+
+    private static String recStyle(boolean recording) {
+        String dot = recording ? ALARM_RED : TEXT_DIM;
+        return "-fx-background-color: " + BG + "; -fx-text-fill: " + dot + ";"
+                + " -fx-border-color: " + dot + "; -fx-border-radius: 6; -fx-background-radius: 6;"
+                + " -fx-font-weight: bold;";
     }
 
     public static void main(String[] args) {

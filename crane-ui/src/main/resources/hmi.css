@@ -1,0 +1,50 @@
+/* Dark industrial HMI theme. Modena derives most control colors from -fx-base,
+   so setting it dark restyles sliders, buttons, combo boxes and list views;
+   the inline styles in CraneRemoteApp then only carry accents. */
+.root {
+    -fx-base: #1c232b;
+    -fx-background: #14181d;
+    -fx-control-inner-background: #10151a;
+    -fx-accent: #e8b716;
+    -fx-focus-color: #e8b716;
+    -fx-faint-focus-color: #e8b71622;
+    -fx-font-family: "Segoe UI", sans-serif;
+}
+
+.slider .track {
+    -fx-background-color: #10151a;
+}
+
+.slider .thumb {
+    -fx-background-color: #e8b716;
+}
+
+.list-view {
+    -fx-background-insets: 0;
+    -fx-padding: 2;
+}
+
+.list-view .scroll-bar {
+    -fx-background-color: #10151a;
+}
+
+.scroll-bar .thumb {
+    -fx-background-color: #39434c;
+}
+
+.combo-box .list-cell {
+    -fx-text-fill: #d7dee4;
+}
+
+.combo-box-popup .list-view {
+    -fx-background-color: #1c232b;
+}
+
+.combo-box-popup .list-cell:hover {
+    -fx-background-color: #2a3440;
+}
+
+.tooltip {
+    -fx-background-color: #1c232b;
+    -fx-text-fill: #d7dee4;
+}

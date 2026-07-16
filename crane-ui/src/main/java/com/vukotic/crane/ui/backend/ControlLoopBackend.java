@@ -8,6 +8,7 @@ import com.vukotic.crane.core.model.CraneState;
 import com.vukotic.crane.core.safety.SafetyController;
 
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * The real backend: adapts the crane-core {@link ControlLoop} (50 Hz on its own
@@ -39,6 +40,15 @@ public final class ControlLoopBackend implements CraneBackend {
     public void stop() {
         loop.stop();
         driver.disconnect();
+    }
+
+    /** Registers a listener called on the loop thread for every published state. */
+    public void addStateListener(Consumer<CraneState> listener) {
+        loop.addStateListener(listener);
+    }
+
+    public void removeStateListener(Consumer<CraneState> listener) {
+        loop.removeStateListener(listener);
     }
 
     @Override
