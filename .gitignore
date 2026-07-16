@@ -22,3 +22,6 @@ Desktop.ini
 
 # Runtime artifacts
 telemetry/
+
+# Local build tooling (WiX binaries etc.)
+tools/

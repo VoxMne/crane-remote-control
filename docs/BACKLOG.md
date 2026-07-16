@@ -47,5 +47,42 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       build/jpackage/CraneRemoteControl/ (56 MB, no Java needed). MSI installer
       deferred: requires WiX Toolset on the build machine
 
-## M4 — Later (not scheduled)
-- [ ] gamepad input · PROTOCOL.md + serial driver · 3D view · anti-sway · fold-to-transport
+## M4a — Physics & assist (branch `feature/physics-ai`)
+- [ ] TODO — Load-sway pendulum in crane-sim: hook swings on the winch rope, excited by
+      axis motion (simplified planar model, heuristic excitation — no geometry contract
+      change). Sway published as extra state entries "loadSway" (deg) / "loadSwayVel"
+- [ ] TODO — DemandFilter chain hook in ControlLoop (pre-safety, thread-safe toggling)
+- [ ] TODO — MotionSmoothingFilter: jerk-limited (S-curve) demand shaping
+- [ ] TODO — AntiSwayFilter: damps pendulum via slew/boom demand correction
+- [ ] TODO — AutoSequencer "fold to transport": phased pose approach (retract extension →
+      raise hook → fold jib → lower boom → center slew), only while deadman held,
+      cancelled by E-STOP or manual input
+- [ ] TODO — Tests: sway decay/excitation, anti-sway settling improvement, smoothing
+      bounds acceleration, sequencer phase order + completion
+
+## M4b — Protocol & serial driver (branch `feature/protocol-serial`)
+- [ ] TODO — docs/PROTOCOL.md: line-based ASCII protocol (demands out / telemetry in),
+      checksums, sequence numbers, watchdog semantics on both ends
+- [ ] TODO — New module crane-driver-serial: SerialCraneDriver implements CraneDriver
+      over jSerialComm behind a SerialLink abstraction (FakeLink for tests)
+- [ ] TODO — Tests: encode/decode roundtrip, checksum rejection, stale-telemetry
+      handling, full driver conversation against a scripted fake crane
+
+## M4c — 3D visualization (branch `feature/render3d`)
+- [ ] TODO — CraneSceneView abstraction (2D canvas view + 3D SubScene view), 2D/3D
+      toggle above the canvas
+- [ ] TODO — Crane3DView: JavaFX 3D boom/jib/extension/hook driven per frame from
+      CraneState, orbitable camera
+- [ ] TODO — Both views draw load sway when "loadSway" is present in state (default 0)
+
+## M4d — MSI installer (on main)
+- [ ] DOING — WiX 3.14 binaries under tools/, jpackage MSI (appVersion 1.x rule),
+      README instructions
+
+## M4e — Integration (on main, after merges)
+- [ ] TODO — UI: ASSIST panel (smoothing + anti-sway toggles), FOLD TO TRANSPORT button
+- [ ] TODO — Wire DemandFilters + AutoSequencer through ControlLoopBackend
+- [ ] TODO — Full build, manual drive test, update ARCHITECTURE if needed
+
+## Skipped for now (no equipment)
+- gamepad/joystick input · Arduino/MCU firmware in C
