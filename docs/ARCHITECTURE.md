@@ -1,0 +1,57 @@
+# Architecture
+
+Ports & adapters: the control core knows nothing about JavaFX or hardware.
+
+```
+crane-ui (JavaFX HMI)
+   │  builds CraneCommand from operator input; renders CraneState
+   ▼
+crane-core (pure Java)
+   ├── model:   CraneProfile, AxisSpec, CraneCommand, CraneState
+   ├── safety:  SafetyController — E-STOP latch, deadman, clamp, ramp limit, watchdog
+   ├── control: ControlLoop — fixed tick (default 50 Hz): input → safety → driver → state out
+   └── driver:  CraneDriver (the port)
+   ▲
+crane-sim (adapter #1: SimulatedCraneDriver — kinematics + first-order actuator dynamics)
+future adapters: serial link to MCU firmware, CAN, vendor radio bridges
+```
+
+## The shared contract (committed in M0, stable for parallel work)
+
+All types in `com.vukotic.crane.core.model` / `...core.driver`:
+
+- **`AxisSpec`** — `id`, `label`, `unit`, `minPosition`, `maxPosition`, `maxVelocity`
+  (units/s at full demand), `commandRampRate` (max demand change per second).
+  Physical units live here and only here.
+- **`CraneProfile`** — `id`, `name`, ordered `List<AxisSpec>`, `axisById()`.
+  `CraneProfiles.demoKnuckleBoom()` = 5 axes: `slew`, `boom`, `jib`, `extension`, `winch`.
+- **`CraneCommand`** — `timestampMillis`, `Map<axisId, demand ∈ [-1,+1]>`,
+  `deadmanHeld`, `estopRequested`, `resetRequested`. `CraneCommand.neutral(profile)` helper.
+- **`CraneState`** — `timestampMillis`, `axisPositions`, `axisVelocities` (physical units),
+  `estopLatched`, `deadmanHeld`, `watchdogTripped`, `activeAlarms` (List<String>).
+- **`CraneDriver`** — `name()`, `connect(profile)`, `disconnect()`, `isConnected()`,
+  `sendDemands(Map<String,Double>)`, `readState()` → positions/velocities.
+  Drivers receive **already-safety-filtered** demands; safety lives in core, not in drivers.
+
+## Safety semantics (tested in crane-core)
+1. E-STOP request latches `estopLatched`; all outgoing demands forced to 0 immediately.
+2. Reset only clears the latch if all operator demands are neutral and deadman is released.
+3. Deadman not held ⇒ demands ramp to 0 quickly (controlled stop, not a frozen output).
+4. Watchdog: no fresh CraneCommand within timeout (default 250 ms) ⇒ same as deadman released.
+5. Demands clamped to [-1,+1] and slew-rate-limited per axis (`commandRampRate`).
+6. Motion toward a violated position limit is zeroed; motion away from it is allowed.
+
+## UI layer (crane-ui)
+- `CraneRenderer` interface over a JavaFX Canvas; v1 implementation = 2D schematic
+  (side view: boom/jib/extension/hook; top view: slew). 3D can slot in later.
+- Control panel: per-axis slider/joystick widgets + keyboard bindings; Space = deadman
+  (hold-to-run); big latching E-STOP button; reset button.
+- Status panel: axis positions, safety flags, alarm list, driver/profile selectors.
+- UI never mutates state directly — it only produces `CraneCommand`s for the ControlLoop
+  and renders the `CraneState` the loop publishes.
+
+## Threading
+ControlLoop runs on its own scheduled thread at fixed tick; UI reads the latest published
+`CraneState` via `javafx.application.Platform.runLater` or an `AnimationTimer` polling an
+`AtomicReference<CraneState>`. Commands flow UI → loop through a thread-safe holder the
+loop samples each tick.
