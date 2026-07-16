@@ -5,8 +5,9 @@ import com.vukotic.crane.core.model.CraneCommand;
 import com.vukotic.crane.core.model.CraneProfile;
 import com.vukotic.crane.core.model.CraneProfiles;
 import com.vukotic.crane.core.model.CraneState;
+import com.vukotic.crane.sim.SimulatedCraneDriver;
+import com.vukotic.crane.ui.backend.ControlLoopBackend;
 import com.vukotic.crane.ui.backend.CraneBackend;
-import com.vukotic.crane.ui.backend.StubCraneBackend;
 import com.vukotic.crane.ui.input.KeyBindings;
 import com.vukotic.crane.ui.input.OperatorInput;
 import com.vukotic.crane.ui.render.CraneRenderer;
@@ -68,8 +69,9 @@ public final class CraneRemoteApp extends Application {
     private final OperatorInput operatorInput = new OperatorInput(keyBindings, profile.axisIds());
 
     /** The ONLY place that decides what runs the crane (see class Javadoc). */
-    private final StubCraneBackend stubBackend = new StubCraneBackend(profile);
-    private final CraneBackend backend = stubBackend;
+    private final ControlLoopBackend controlBackend =
+            new ControlLoopBackend(profile, new SimulatedCraneDriver());
+    private final CraneBackend backend = controlBackend;
     private final Consumer<CraneCommand> commandSink = backend::submitCommand;
 
     private final CraneRenderer renderer = new SchematicRenderer2D();
@@ -105,7 +107,7 @@ public final class CraneRemoteApp extends Application {
         stage.setScene(scene);
         stage.show();
 
-        stubBackend.start();
+        controlBackend.start();
         frameTimer = new AnimationTimer() {
             @Override
             public void handle(long frameNanos) {
@@ -125,7 +127,7 @@ public final class CraneRemoteApp extends Application {
         if (frameTimer != null) {
             frameTimer.stop();
         }
-        stubBackend.stop();
+        controlBackend.stop();
     }
 
     // ---- left: controls ----
@@ -222,7 +224,7 @@ public final class CraneRemoteApp extends Application {
 
         panel.getChildren().add(sectionLabel("STATUS"));
         panel.getChildren().add(infoRow("PROFILE", profile.name()));
-        panel.getChildren().add(infoRow("DRIVER", "Simulator"));
+        panel.getChildren().add(infoRow("DRIVER", controlBackend.driverName()));
 
         panel.getChildren().add(sectionLabel("AXIS POSITIONS"));
         for (AxisSpec axis : profile.axes()) {

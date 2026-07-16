@@ -31,9 +31,11 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       CraneBackend seam + throwaway StubCraneBackend in com.vukotic.crane.ui.backend
 
 ## M2b — Integration (on `main`, after merging both branches)
-- [ ] TODO — Merge feature/core-sim + feature/ui-shell
-- [ ] TODO — Wire UI → ControlLoop → SimulatedCraneDriver → CraneState → renderer
-- [ ] TODO — Manual drive test (all axes, deadman, E-STOP, watchdog)
+- [x] DONE — Merge feature/core-sim + feature/ui-shell
+- [x] DONE — Wire UI → ControlLoop → SimulatedCraneDriver → CraneState → renderer
+      (ControlLoopBackend adapter; throwaway StubCraneBackend deleted)
+- [ ] DOING — Manual drive test (all axes, deadman, E-STOP, watchdog) — app launched,
+      awaiting operator feedback
 
 ## M3 — Universality & polish
 - [ ] TODO — JSON crane profiles + loader (Jackson); 2 bundled profiles
