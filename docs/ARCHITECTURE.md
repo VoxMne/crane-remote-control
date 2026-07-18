@@ -41,6 +41,21 @@ All types in `com.vukotic.crane.core.model` / `...core.driver`:
 5. Demands clamped to [-1,+1] and slew-rate-limited per axis (`commandRampRate`).
 6. Motion toward a violated position limit is zeroed; motion away from it is allowed.
 
+## Assist pipeline (M4)
+`ControlLoop` applies an optional chain of `DemandFilter`s to the raw demands each tick,
+BEFORE the safety layer — assists shape motion, safety always has the final word:
+- `MotionSmoothingFilter` — jerk-limited (S-curve) demand shaping, no overshoot.
+- `AntiSwayFilter` — damps the load pendulum by correcting the slew demand with
+  `-kP*sway -kD*swayVel`; passes through when no sway data is present.
+- `AutoSequencer` (UI-side, not a filter) — "fold to transport": drives one axis at a
+  time (extension → winch → jib → boom → slew) toward a conventional pose; only moves
+  while the operator holds the deadman; any manual input or E-STOP cancels.
+
+The simulator models the hook load as a planar damped pendulum (`LoadSwayModel`)
+excited by a heuristic boom-tip speed, and publishes it as extra state map entries
+`"loadSway"` (deg) / `"loadSwayVel"` (deg/s) — a contract-free virtual sensor channel
+(consumers use getOrDefault semantics and iterate profile axes only).
+
 ## UI layer (crane-ui)
 - `CraneRenderer` interface over a JavaFX Canvas; v1 implementation = 2D schematic
   (side view: boom/jib/extension/hook; top view: slew). 3D can slot in later.

@@ -57,6 +57,9 @@ public final class ControlLoop {
     private final AtomicReference<CraneState> latestState;
     private final List<Consumer<CraneState>> stateListeners = new CopyOnWriteArrayList<>();
 
+    /** Assist chain applied to raw demands before safety; swapped atomically at runtime. */
+    private volatile List<DemandFilter> demandFilters = List.of();
+
     /** Positions fed to the safety layer; refreshed from the driver every tick. */
     private volatile Map<String, Double> lastKnownPositions;
 
@@ -146,6 +149,15 @@ public final class ControlLoop {
         return latestState.get();
     }
 
+    /**
+     * Replaces the assist filter chain, applied in list order to the raw demands
+     * of every subsequent tick, before the safety layer. Thread-safe; pass an
+     * empty list to disable all assists.
+     */
+    public void setDemandFilters(List<DemandFilter> filters) {
+        this.demandFilters = List.copyOf(Objects.requireNonNull(filters, "filters"));
+    }
+
     /** Registers a listener invoked on the loop thread after every published state. */
     public void addStateListener(Consumer<CraneState> listener) {
         stateListeners.add(Objects.requireNonNull(listener, "listener"));
@@ -184,6 +196,19 @@ public final class ControlLoop {
      */
     public CraneState tick(long nowMillis, double dtSeconds) {
         CraneCommand command = latestCommand.get();
+
+        // Assist chain (smoothing, anti-sway, ...) reshapes raw demands first;
+        // the safety layer below remains the final authority on what goes out.
+        List<DemandFilter> filters = demandFilters;
+        if (!filters.isEmpty()) {
+            CraneState last = latestState.get();
+            Map<String, Double> shaped = command.axisDemands();
+            for (DemandFilter filter : filters) {
+                shaped = filter.apply(shaped, last, dtSeconds);
+            }
+            command = new CraneCommand(command.timestampMillis(), shaped,
+                    command.deadmanHeld(), command.estopRequested(), command.resetRequested());
+        }
 
         Map<String, Double> positions = lastKnownPositions;
         if (positions == null) {

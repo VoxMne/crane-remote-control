@@ -48,17 +48,17 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       deferred: requires WiX Toolset on the build machine
 
 ## M4a — Physics & assist (branch `feature/physics-ai`)
-- [ ] TODO — Load-sway pendulum in crane-sim: hook swings on the winch rope, excited by
-      axis motion (simplified planar model, heuristic excitation — no geometry contract
-      change). Sway published as extra state entries "loadSway" (deg) / "loadSwayVel"
-- [ ] TODO — DemandFilter chain hook in ControlLoop (pre-safety, thread-safe toggling)
-- [ ] TODO — MotionSmoothingFilter: jerk-limited (S-curve) demand shaping
-- [ ] TODO — AntiSwayFilter: damps pendulum via slew/boom demand correction
-- [ ] TODO — AutoSequencer "fold to transport": phased pose approach (retract extension →
-      raise hook → fold jib → lower boom → center slew), only while deadman held,
-      cancelled by E-STOP or manual input
-- [ ] TODO — Tests: sway decay/excitation, anti-sway settling improvement, smoothing
-      bounds acceleration, sequencer phase order + completion
+- [x] DONE — Load-sway pendulum in crane-sim (LoadSwayModel, semi-implicit Euler,
+      substeps; heuristic tip excitation). Published as "loadSway"/"loadSwayVel"
+- [x] DONE — DemandFilter chain hook in ControlLoop (pre-safety, volatile swap)
+- [x] DONE — MotionSmoothingFilter: trapezoidal S-curve, braking cap, terminal snap
+- [x] DONE — AntiSwayFilter: slew correction -kP*sway -kD*swayVel, neutral deadband,
+      passthrough without sway data
+- [x] DONE — AutoSequencer "fold to transport": phased, deadman passthrough,
+      cancel on manual input / E-STOP
+- [x] DONE — Tests (17 new): sway decay/excitation/rope-period, closed-loop anti-sway
+      halves settled sway, smoothing accel bound + no overshoot, sequencer order,
+      rogue-filter still clamped + E-STOP wins
 
 ## M4b — Protocol & serial driver (branch `feature/protocol-serial`)
 - [ ] TODO — docs/PROTOCOL.md: line-based ASCII protocol (demands out / telemetry in),
