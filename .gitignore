@@ -20,8 +20,8 @@ Desktop.ini
 # Agent worktrees (never commit nested checkouts)
 .worktrees/
 
-# Runtime artifacts
-telemetry/
+# Runtime artifacts (root-level only — never match source packages!)
+/telemetry/
 
 # Local build tooling (WiX binaries etc.)
-tools/
+/tools/
