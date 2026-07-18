@@ -9,8 +9,9 @@ import com.vukotic.crane.sim.SimulatedCraneDriver;
 import com.vukotic.crane.ui.backend.ControlLoopBackend;
 import com.vukotic.crane.ui.input.KeyBindings;
 import com.vukotic.crane.ui.input.OperatorInput;
-import com.vukotic.crane.ui.render.CraneRenderer;
-import com.vukotic.crane.ui.render.SchematicRenderer2D;
+import com.vukotic.crane.ui.render.Crane3DView;
+import com.vukotic.crane.ui.render.CraneSceneView;
+import com.vukotic.crane.ui.render.Schematic2DView;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.collections.FXCollections;
@@ -18,7 +19,6 @@ import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.canvas.Canvas;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
@@ -26,11 +26,12 @@ import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.Slider;
 import javafx.scene.control.ToggleButton;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
@@ -81,7 +82,6 @@ public final class CraneRemoteApp extends Application {
     private static final int ALARM_HISTORY_LIMIT = 100;
 
     private final KeyBindings keyBindings = KeyBindings.defaults();
-    private final CraneRenderer renderer = new SchematicRenderer2D();
     private final List<CraneProfile> catalog = ProfileCatalog.available();
 
     // ---- per-profile session, rebuilt by activateProfile() ----
@@ -103,16 +103,21 @@ public final class CraneRemoteApp extends Application {
     private Circle watchdogLamp;
     private ToggleButton recordButton;
     private Label recordInfo;
-    private Canvas canvas;
     private AnimationTimer frameTimer;
     private TelemetryCsvLogger telemetryLogger;
+
+    // Center visualization: recreated per profile; the 2D/3D choice survives switches.
+    private Schematic2DView view2d;
+    private Crane3DView view3d;
+    private CraneSceneView activeView;
+    private StackPane viewStack;
+    private boolean use3d;
 
     @Override
     public void start(Stage stage) {
         root = new BorderPane();
         root.setStyle("-fx-background-color: " + BG + ";");
-        root.setCenter(buildCanvasPane());
-        BorderPane.setMargin(root.getCenter(), new Insets(10));
+        // The center view is built per profile in activateProfile().
 
         Scene scene = new Scene(root, 1280, 800);
         scene.getStylesheets().add(getClass().getResource("/hmi.css").toExternalForm());
@@ -133,8 +138,7 @@ public final class CraneRemoteApp extends Application {
                 backend.submitCommand(command);
                 CraneState state = backend.latestState();
                 updateReadouts(command, state);
-                renderer.render(canvas.getGraphicsContext2D(),
-                        canvas.getWidth(), canvas.getHeight(), profile, state);
+                activeView.update(profile, state);
             }
         };
         frameTimer.start();
@@ -172,8 +176,10 @@ public final class CraneRemoteApp extends Application {
         previousAlarms = Set.of();
 
         root.setLeft(buildControlPanel());
+        root.setCenter(buildCenterPane());
         root.setRight(buildStatusPanel());
         BorderPane.setMargin(root.getLeft(), new Insets(10, 0, 10, 10));
+        BorderPane.setMargin(root.getCenter(), new Insets(10));
         BorderPane.setMargin(root.getRight(), new Insets(10, 10, 10, 0));
 
         backend.start();
@@ -251,16 +257,53 @@ public final class CraneRemoteApp extends Application {
         return new VBox(2, header, slider);
     }
 
-    // ---- center: visualization ----
+    // ---- center: visualization (switchable 2D schematic / 3D scene) ----
 
-    private Pane buildCanvasPane() {
-        Pane holder = new Pane();
-        holder.setStyle("-fx-background-color: " + BG + ";");
-        canvas = new Canvas();
-        canvas.widthProperty().bind(holder.widthProperty());
-        canvas.heightProperty().bind(holder.heightProperty());
-        holder.getChildren().add(canvas);
-        return holder;
+    private StackPane buildCenterPane() {
+        view2d = new Schematic2DView();
+        view3d = new Crane3DView();
+
+        viewStack = new StackPane();
+        activeView = use3d ? view3d : view2d;
+        viewStack.getChildren().add(activeView.node());
+
+        ToggleButton btn2d = new ToggleButton("2D");
+        ToggleButton btn3d = new ToggleButton("3D");
+        ToggleGroup group = new ToggleGroup();
+        btn2d.setToggleGroup(group);
+        btn3d.setToggleGroup(group);
+        btn2d.setFocusTraversable(false);
+        btn3d.setFocusTraversable(false);
+        (use3d ? btn3d : btn2d).setSelected(true);
+        btn2d.setStyle(viewToggleStyle(!use3d));
+        btn3d.setStyle(viewToggleStyle(use3d));
+        group.selectedToggleProperty().addListener((obs, was, selected) -> {
+            if (selected == null) {
+                was.setSelected(true); // one view is always active — no deselection
+                return;
+            }
+            use3d = selected == btn3d;
+            activeView = use3d ? view3d : view2d;
+            viewStack.getChildren().set(0, activeView.node());
+            btn2d.setStyle(viewToggleStyle(!use3d));
+            btn3d.setStyle(viewToggleStyle(use3d));
+        });
+
+        HBox toggleBar = new HBox(6, btn2d, btn3d);
+        toggleBar.setPadding(new Insets(8));
+        toggleBar.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
+        toggleBar.setPickOnBounds(false);
+
+        StackPane center = new StackPane(viewStack, toggleBar);
+        StackPane.setAlignment(toggleBar, Pos.TOP_RIGHT);
+        return center;
+    }
+
+    private static String viewToggleStyle(boolean selected) {
+        String color = selected ? AMBER : TEXT_DIM;
+        return "-fx-background-color: " + PANEL_BG + "; -fx-text-fill: " + color + ";"
+                + " -fx-border-color: " + color + "; -fx-border-radius: 6;"
+                + " -fx-background-radius: 6; -fx-font-weight: bold; -fx-font-size: 12px;";
     }
 
     // ---- right: status ----

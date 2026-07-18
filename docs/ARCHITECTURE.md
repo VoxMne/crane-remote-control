@@ -50,6 +50,15 @@ All types in `com.vukotic.crane.core.model` / `...core.driver`:
 - UI never mutates state directly — it only produces `CraneCommand`s for the ControlLoop
   and renders the `CraneState` the loop publishes.
 
+## 3D view (M4)
+The center visualization sits behind `CraneSceneView` (`node()` + per-frame `update()`):
+`Schematic2DView` wraps the existing canvas renderer; `Crane3DView` is a JavaFX 3D
+SubScene — articulated boom/jib/extension/rope built once, per-frame updates only mutate
+transforms. Orbit camera (drag = azimuth/elevation, scroll = zoom). A 2D/3D toggle
+overlays the center pane; the choice survives profile switches, views are recreated per
+profile. Both views deflect the rope by the optional `"loadSway"` state entry (0 when
+absent) and show the E-STOP banner.
+
 ## Profiles & telemetry (M3)
 - `CraneProfileLoader` (core, Jackson): JSON → `CraneProfile` with strict validation
   (unknown fields rejected; record constructor rules surface as `ProfileLoadException`).
