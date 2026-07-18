@@ -79,6 +79,17 @@ excited by a heuristic boom-tip speed, and publishes it as extra state map entri
 → self-contained `build/jpackage/CraneRemoteControl/`. Main class is the non-Application
 `Launcher` (classpath JavaFX rule). MSI installer needs WiX Toolset installed.
 
+## Serial link (M4)
+Module `crane-driver-serial`: `SerialCraneDriver` implements the `CraneDriver` port over
+the Crane Serial Protocol v1 (docs/PROTOCOL.md) — checksummed ASCII lines at 115200 8N1,
+`HELLO`/`HI` handshake with axis verification, `D` demand lines per tick, `T` telemetry
+parsed on a reader thread. Corrupted lines are dropped and counted; stale telemetry is
+exposed via `millisSinceLastTelemetry()` and never blocks the demand path. The transport
+sits behind the `SerialLink` seam (`JSerialCommLink` for real COM ports, an in-memory
+fake in tests), so all protocol logic is tested without hardware. The safety layer stays
+host-side: the wire carries no E-STOP/deadman flags — zero demands are the stop, and the
+firmware's only mandatory safety duty is its own 250 ms watchdog.
+
 ## Threading
 ControlLoop runs on its own scheduled thread at fixed tick; UI reads the latest published
 `CraneState` via `javafx.application.Platform.runLater` or an `AnimationTimer` polling an
