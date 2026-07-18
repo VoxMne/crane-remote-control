@@ -61,12 +61,14 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       bounds acceleration, sequencer phase order + completion
 
 ## M4b — Protocol & serial driver (branch `feature/protocol-serial`)
-- [ ] TODO — docs/PROTOCOL.md: line-based ASCII protocol (demands out / telemetry in),
-      checksums, sequence numbers, watchdog semantics on both ends
-- [ ] TODO — New module crane-driver-serial: SerialCraneDriver implements CraneDriver
-      over jSerialComm behind a SerialLink abstraction (FakeLink for tests)
-- [ ] TODO — Tests: encode/decode roundtrip, checksum rejection, stale-telemetry
-      handling, full driver conversation against a scripted fake crane
+- [x] DONE — docs/PROTOCOL.md: CSP/1 — NMEA-style XOR checksums, 5-digit sequences,
+      HELLO/HI handshake, D/T lines, firmware watchdog rules + implementer checklist
+- [x] DONE — Module crane-driver-serial: CspCodec (total parser, never throws on wire
+      data), SerialLink seam, JSerialCommLink (115200 8N1), SerialCraneDriver with
+      reader thread, droppedLineCount + millisSinceLastTelemetry diagnostics
+- [x] DONE — 23 tests: documented byte examples verified exactly, roundtrips, corrupt/
+      overlong/malformed rejection, handshake success + missing-axis failure, telemetry
+      merge semantics, sequenced writes, clean reader shutdown
 
 ## M4c — 3D visualization (branch `feature/render3d`)
 - [ ] TODO — CraneSceneView abstraction (2D canvas view + 3D SubScene view), 2D/3D
