@@ -173,22 +173,26 @@ public final class SchematicRenderer2D implements CraneRenderer {
         drawJoint(g, pivotX, pivotY, 0.22);
         drawJoint(g, boomTipX, boomTipY, 0.18);
 
-        // Rope (dashed) + hook block, hanging straight down from the jib tip.
-        // hookY = world y of the rope end; block and hook hang just below it.
+        // Rope (dashed) + hook block, hanging from the jib tip and deflected from
+        // vertical by the optional "loadSway" pendulum angle (reads 0 when absent).
         double blockWidth = 0.34, blockHeight = 0.42, hookDrop = 0.32;
-        double hookY = Math.max(jibTipY - rope, blockHeight + hookDrop + 0.1);
+        double ropeLen = Math.max(0.0,
+                jibTipY - Math.max(jibTipY - rope, blockHeight + hookDrop + 0.1));
+        double swayRad = Math.toRadians(state.position("loadSway"));
+        double hookX = jibTipX + ropeLen * Math.sin(swayRad);
+        double hookY = jibTipY - ropeLen * Math.cos(swayRad);
         g.save();
         g.setStroke(ROPE);
         g.setLineWidth(Math.max(1.2, 0.05 * scale));
         g.setLineDashes(6, 6);
-        g.strokeLine(sx(jibTipX), sy(jibTipY), sx(jibTipX), sy(hookY));
+        g.strokeLine(sx(jibTipX), sy(jibTipY), sx(hookX), sy(hookY));
         g.restore();
 
         g.setFill(HOOK_RED);
-        g.fillRect(sx(jibTipX - blockWidth / 2), sy(hookY), blockWidth * scale, blockHeight * scale);
+        g.fillRect(sx(hookX - blockWidth / 2), sy(hookY), blockWidth * scale, blockHeight * scale);
         g.setStroke(HOOK_RED);
         g.setLineWidth(Math.max(1.5, 0.07 * scale));
-        g.strokeArc(sx(jibTipX - 0.16), sy(hookY - blockHeight), 0.32 * scale, hookDrop * scale,
+        g.strokeArc(sx(hookX - 0.16), sy(hookY - blockHeight), 0.32 * scale, hookDrop * scale,
                 200, 220, javafx.scene.shape.ArcType.OPEN);
     }
 

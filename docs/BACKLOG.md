@@ -71,11 +71,11 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       merge semantics, sequenced writes, clean reader shutdown
 
 ## M4c — 3D visualization (branch `feature/render3d`)
-- [ ] TODO — CraneSceneView abstraction (2D canvas view + 3D SubScene view), 2D/3D
-      toggle above the canvas
-- [ ] TODO — Crane3DView: JavaFX 3D boom/jib/extension/hook driven per frame from
-      CraneState, orbitable camera
-- [ ] TODO — Both views draw load sway when "loadSway" is present in state (default 0)
+- [x] DONE — CraneSceneView abstraction; Schematic2DView wraps the canvas renderer;
+      2D/3D toggle overlays the center pane, choice survives profile switches
+- [x] DONE — Crane3DView: articulated JavaFX 3D crane (transform-only per-frame
+      updates), ground grid, truck, orbit camera (drag) + zoom (scroll), E-STOP banner
+- [x] DONE — Load sway deflects the rope in BOTH views via optional "loadSway" entry
 
 ## M4d — MSI installer (on main)
 - [x] DONE — WiX 3.14 binaries under tools/ (gitignored), jpackage MSI
