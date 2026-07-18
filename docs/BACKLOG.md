@@ -83,9 +83,12 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       shortcut; appVersion 1.x because MSI rejects a leading 0), README instructions
 
 ## M4e — Integration (on main, after merges)
-- [ ] TODO — UI: ASSIST panel (smoothing + anti-sway toggles), FOLD TO TRANSPORT button
-- [ ] TODO — Wire DemandFilters + AutoSequencer through ControlLoopBackend
-- [ ] TODO — Full build, manual drive test, update ARCHITECTURE if needed
+- [x] DONE — UI: ASSIST panel (SMOOTHING + ANTI-SWAY toggles, states survive profile
+      switches), FOLD TO TRANSPORT toggle + live status line
+- [x] DONE — ControlLoopBackend.configureAssists (smoothing before anti-sway);
+      frame loop routes commands through AutoSequencer while active
+- [x] DONE — Full build green: 121 tests / 0 failures across all four modules
+- [ ] DOING — Manual drive test (sway, assists, fold, 2D/3D, profiles) — operator
 
 ## Skipped for now (no equipment)
 - gamepad/joystick input · Arduino/MCU firmware in C

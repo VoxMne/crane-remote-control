@@ -5,8 +5,13 @@ import com.vukotic.crane.core.driver.CraneDriver;
 import com.vukotic.crane.core.model.CraneCommand;
 import com.vukotic.crane.core.model.CraneProfile;
 import com.vukotic.crane.core.model.CraneState;
+import com.vukotic.crane.core.assist.AntiSwayFilter;
+import com.vukotic.crane.core.assist.MotionSmoothingFilter;
+import com.vukotic.crane.core.control.DemandFilter;
 import com.vukotic.crane.core.safety.SafetyController;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -40,6 +45,22 @@ public final class ControlLoopBackend implements CraneBackend {
     public void stop() {
         loop.stop();
         driver.disconnect();
+    }
+
+    /**
+     * Enables/disables the assist filters. Smoothing runs first (shapes operator
+     * input), anti-sway second so its damping correction is never delayed by the
+     * smoother. Fresh filter instances each call — no stale per-axis state.
+     */
+    public void configureAssists(boolean smoothing, boolean antiSway) {
+        List<DemandFilter> chain = new ArrayList<>();
+        if (smoothing) {
+            chain.add(new MotionSmoothingFilter());
+        }
+        if (antiSway) {
+            chain.add(new AntiSwayFilter());
+        }
+        loop.setDemandFilters(chain);
     }
 
     /** Registers a listener called on the loop thread for every published state. */

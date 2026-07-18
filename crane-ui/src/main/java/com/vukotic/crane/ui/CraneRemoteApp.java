@@ -3,6 +3,7 @@ package com.vukotic.crane.ui;
 import com.vukotic.crane.core.model.AxisSpec;
 import com.vukotic.crane.core.model.CraneCommand;
 import com.vukotic.crane.core.model.CraneProfile;
+import com.vukotic.crane.core.assist.AutoSequencer;
 import com.vukotic.crane.core.model.CraneState;
 import com.vukotic.crane.core.telemetry.TelemetryCsvLogger;
 import com.vukotic.crane.sim.SimulatedCraneDriver;
@@ -113,6 +114,13 @@ public final class CraneRemoteApp extends Application {
     private StackPane viewStack;
     private boolean use3d;
 
+    // Assists: toggle choices survive profile switches; the sequencer never does.
+    private final AutoSequencer foldSequencer = new AutoSequencer();
+    private boolean smoothingOn;
+    private boolean antiSwayOn;
+    private ToggleButton foldButton;
+    private Label foldStatus;
+
     @Override
     public void start(Stage stage) {
         root = new BorderPane();
@@ -135,6 +143,9 @@ public final class CraneRemoteApp extends Application {
             @Override
             public void handle(long frameNanos) {
                 CraneCommand command = operatorInput.snapshot(System.currentTimeMillis());
+                if (foldSequencer.isActive()) {
+                    command = foldSequencer.next(backend.latestState(), command);
+                }
                 backend.submitCommand(command);
                 CraneState state = backend.latestState();
                 updateReadouts(command, state);
@@ -169,6 +180,8 @@ public final class CraneRemoteApp extends Application {
         profile = newProfile;
         operatorInput = new OperatorInput(keyBindings, profile.axisIds());
         backend = new ControlLoopBackend(profile, new SimulatedCraneDriver());
+        foldSequencer.cancel(); // never carry an auto-sequence across cranes
+        backend.configureAssists(smoothingOn, antiSwayOn);
 
         demandReadouts.clear();
         positionReadouts.clear();
@@ -197,6 +210,9 @@ public final class CraneRemoteApp extends Application {
         for (AxisSpec axis : profile.axes()) {
             panel.getChildren().add(buildAxisControl(axis));
         }
+
+        panel.getChildren().add(sectionLabel("ASSIST"));
+        panel.getChildren().add(buildAssistControls());
 
         Region spacer = new Region();
         VBox.setVgrow(spacer, Priority.ALWAYS);
@@ -231,6 +247,56 @@ public final class CraneRemoteApp extends Application {
 
         panel.getChildren().addAll(spacer, estopButton, resetButton, deadmanIndicator);
         return panel;
+    }
+
+    private VBox buildAssistControls() {
+        ToggleButton smoothToggle = new ToggleButton("SMOOTHING");
+        ToggleButton antiSwayToggle = new ToggleButton("ANTI-SWAY");
+        for (ToggleButton toggle : List.of(smoothToggle, antiSwayToggle)) {
+            toggle.setMaxWidth(Double.MAX_VALUE);
+            toggle.setFocusTraversable(false);
+            HBox.setHgrow(toggle, Priority.ALWAYS);
+        }
+        smoothToggle.setSelected(smoothingOn);
+        antiSwayToggle.setSelected(antiSwayOn);
+        smoothToggle.setStyle(assistStyle(smoothingOn));
+        antiSwayToggle.setStyle(assistStyle(antiSwayOn));
+        smoothToggle.selectedProperty().addListener((obs, was, selected) -> {
+            smoothingOn = selected;
+            smoothToggle.setStyle(assistStyle(selected));
+            backend.configureAssists(smoothingOn, antiSwayOn);
+        });
+        antiSwayToggle.selectedProperty().addListener((obs, was, selected) -> {
+            antiSwayOn = selected;
+            antiSwayToggle.setStyle(assistStyle(selected));
+            backend.configureAssists(smoothingOn, antiSwayOn);
+        });
+
+        foldButton = new ToggleButton("FOLD TO TRANSPORT");
+        foldButton.setMaxWidth(Double.MAX_VALUE);
+        foldButton.setFocusTraversable(false);
+        foldButton.setStyle(assistStyle(false));
+        foldButton.selectedProperty().addListener((obs, was, selected) -> {
+            foldButton.setStyle(assistStyle(selected));
+            if (selected) {
+                foldSequencer.start(profile);
+            } else {
+                foldSequencer.cancel();
+            }
+        });
+
+        foldStatus = new Label("auto-fold idle");
+        foldStatus.setStyle("-fx-text-fill: " + TEXT_DIM + "; -fx-font-size: 11px;");
+        foldStatus.setWrapText(true);
+
+        return new VBox(6, new HBox(6, smoothToggle, antiSwayToggle), foldButton, foldStatus);
+    }
+
+    private static String assistStyle(boolean on) {
+        String color = on ? AMBER : TEXT_DIM;
+        return "-fx-background-color: " + BG + "; -fx-text-fill: " + color + ";"
+                + " -fx-border-color: " + color + "; -fx-border-radius: 6;"
+                + " -fx-background-radius: 6; -fx-font-weight: bold; -fx-font-size: 11px;";
     }
 
     private VBox buildAxisControl(AxisSpec axis) {
@@ -489,6 +555,27 @@ public final class CraneRemoteApp extends Application {
             alarmItems.setAll(state.activeAlarms());
         }
         recordAlarmHistory(state);
+        updateFoldStatus();
+    }
+
+    /** Keeps the FOLD button and its status line in sync with the sequencer. */
+    private void updateFoldStatus() {
+        if (foldButton == null) {
+            return;
+        }
+        if (foldSequencer.isActive()) {
+            String axis = foldSequencer.activeAxis();
+            foldStatus.setText(operatorInput.deadmanHeld()
+                    ? "auto-fold: driving '" + axis + "'"
+                    : "auto-fold armed: hold SPACE to run ('" + axis + "')");
+        } else {
+            if (foldButton.isSelected()) {
+                foldButton.setSelected(false); // finished or cancelled by input/E-STOP
+            }
+            foldStatus.setText(foldSequencer.isComplete()
+                    ? "auto-fold: transport pose reached"
+                    : "auto-fold idle");
+        }
     }
 
     /** Prepends newly raised alarms (with a time stamp) to the history, capped. */
