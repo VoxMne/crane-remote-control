@@ -20,8 +20,9 @@ Desktop.ini
 # Agent worktrees (never commit nested checkouts)
 .worktrees/
 
-# Runtime artifacts (root-level only — never match source packages!)
+# Runtime artifacts (explicit locations only — never match source packages!)
 /telemetry/
+crane-ui/telemetry/
 
 # Local build tooling (WiX binaries etc.)
 /tools/
