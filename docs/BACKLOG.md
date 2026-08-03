@@ -103,19 +103,16 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — Version 1.0.0, refreshed app-image + MSI, git tag v1.0.0
 
 ## M5a — 3D world overhaul (branch `feature/world3d`) — V2 items 1,2,3,4
-- [ ] TODO — Procedural-mesh crane (TriangleMesh: tapered boom sections, chamfers),
-      animated hydraulic cylinders (boom + jib rams that visibly extend), detailed
-      truck (cab with window faces, wheel rims). NO external asset files.
-- [ ] TODO — Environment: gradient sky fill, sun (bright sphere + point light), blob
-      shadows under crane/load, dock at one side, translucent water plane, procedural
-      boat hull floating in the water
-- [ ] TODO — Cargo: enum CargoType { NONE, PALLET, CONTAINER, BOAT }; selected cargo
-      hangs from the hook (follows sway), rests on the ground when lowered onto it,
-      re-attaches when raised — purely visual state machine inside the 3D view
-- [ ] TODO — Cameras: enum CameraMode { ORBIT, CAB, HOOK, FOLLOW } with smooth
-      transitions. FROZEN PUBLIC API on Crane3DView for integration:
-      setCameraMode(CameraMode), cameraMode(), setCargo(CargoType), cargo()
-- [ ] TODO — Scope guard: crane-ui render package ONLY; CraneRemoteApp untouched
+- [x] DONE — MeshFactory (TriangleMesh, dual-winding faces): tapered chamfered beams
+      for boom/extension/jib, boat hull; HydraulicRam boom + jib cylinders animated
+      from the joint angles; truck with windows, chassis rail, wheel rims
+- [x] DONE — Environment: gradient sky, sun sphere + key light, blob shadows (truck,
+      pillar, hook-tracking), quay with bollards, translucent water, bobbing boat
+- [x] DONE — CargoType NONE/PALLET/CONTAINER/BOAT with hang → set down → pick up
+      state machine, sway inherited
+- [x] DONE — CameraMode ORBIT/CAB/HOOK/FOLLOW via a single rig parametrization with
+      interpolated switches; frozen API setCameraMode/cameraMode/setCargo/cargo
+- [x] DONE — Scope guard respected: render package only
 
 ## M5b — 2D pro view (branch `feature/render2d-pro`) — V2 item 5
 - [ ] TODO — Zoom (scroll) + pan (drag) inside Schematic2DView, double-click = fit

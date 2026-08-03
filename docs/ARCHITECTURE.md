@@ -74,6 +74,24 @@ overlays the center pane; the choice survives profile switches, views are recrea
 profile. Both views deflect the rope by the optional `"loadSway"` state entry (0 when
 absent) and show the E-STOP banner.
 
+## 3D world (M5)
+Everything is procedural — `MeshFactory` builds `TriangleMesh` shapes (tapered,
+chamfered beam sections; a stylised boat hull), emitting each triangle in both winding
+orders so faces light correctly from either side. The scene adds animated hydraulic
+rams (`HydraulicRam` spans two anchor points computed per frame from the joint angles),
+a detailed truck, a gradient sky with sun + key light, blob shadows including one that
+tracks the hook, and a dock with water and a moored, gently bobbing boat.
+
+`CargoType` (NONE/PALLET/CONTAINER/BOAT) hangs below the hook, inherits sway, detaches
+when it touches the ground and re-attaches when the hook returns within 0.7 m — a purely
+visual state machine, no effect on the simulation.
+
+`CameraMode` (ORBIT/CAB/HOOK/FOLLOW) is expressed through one parametrization — orbit
+centre, azimuth, elevation, distance — so switching modes interpolates instead of
+cutting; `rigFromEye` inverts the rig chain to place the camera at a desired eye point
+(used by CAB and FOLLOW). Mouse orbit/zoom applies only in ORBIT.
+Frozen public API for the UI: `setCameraMode`/`cameraMode`, `setCargo`/`cargo`.
+
 ## Profiles & telemetry (M3)
 - `CraneProfileLoader` (core, Jackson): JSON → `CraneProfile` with strict validation
   (unknown fields rejected; record constructor rules surface as `ProfileLoadException`).
