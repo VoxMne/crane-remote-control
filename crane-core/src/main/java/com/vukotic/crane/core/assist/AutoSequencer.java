@@ -53,10 +53,12 @@ public final class AutoSequencer {
 
     private final double tolerance;
 
-    private List<Phase> phases = List.of();
-    private int phaseIndex;
-    private boolean active;
-    private boolean complete;
+    // Volatile: start/cancel and the status getters are called from a UI thread
+    // while next() runs on the command thread.
+    private volatile List<Phase> phases = List.of();
+    private volatile int phaseIndex;
+    private volatile boolean active;
+    private volatile boolean complete;
 
     public AutoSequencer() {
         this(DEFAULT_TOLERANCE);

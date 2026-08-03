@@ -81,4 +81,9 @@ public final class Schematic2DView implements CraneSceneView {
         renderer.render(canvas.getGraphicsContext2D(),
                 canvas.getWidth(), canvas.getHeight(), profile, state);
     }
+
+    @Override
+    public void setCargo(CargoType type) {
+        renderer.setCargo(type);
+    }
 }

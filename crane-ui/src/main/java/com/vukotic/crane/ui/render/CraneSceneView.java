@@ -20,4 +20,12 @@ public interface CraneSceneView {
 
     /** Applies one frame of state. Called on the FX thread by the frame timer. */
     void update(CraneProfile profile, CraneState state);
+
+    /**
+     * Selects the load drawn on the hook. Views that show cargo honour it; the
+     * default is to ignore it.
+     */
+    default void setCargo(CargoType type) {
+        // no cargo in this view
+    }
 }

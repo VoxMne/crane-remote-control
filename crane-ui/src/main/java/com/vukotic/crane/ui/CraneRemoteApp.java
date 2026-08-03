@@ -99,9 +99,16 @@ public final class CraneRemoteApp extends Application {
     private final List<CraneProfile> catalog = ProfileCatalog.available();
 
     // ---- per-profile session, rebuilt by activateProfile() ----
-    private CraneProfile profile;
-    private OperatorInput operatorInput;
-    private ControlLoopBackend backend;
+    // Volatile: swapped on the FX thread, read by the command thread.
+    private volatile CraneProfile profile;
+    private volatile OperatorInput operatorInput;
+    private volatile ControlLoopBackend backend;
+
+    /** Fixed-rate operator-command thread — see startCommandThread(). */
+    private static final long COMMAND_PERIOD_MILLIS = 20; // 50 Hz
+    private Thread commandThread;
+    private volatile boolean commandThreadRunning;
+    private volatile CraneCommand lastCommand;
 
     private final Map<String, Label> demandReadouts = new HashMap<>();
     private final Map<String, Label> positionReadouts = new HashMap<>();
@@ -174,33 +181,89 @@ public final class CraneRemoteApp extends Application {
         stage.show();
 
         String snapshotDir = System.getProperty("crane.devSnapshotDir");
-        if (snapshotDir != null) {
+        if (DIAG) {
+            runStressProbe();
+        } else if (snapshotDir != null) {
             runDevSnapshotProbe(stage, Path.of(snapshotDir));
         }
 
+        startCommandThread();
+
+        // The frame timer only DRAWS. It never produces commands, so a slow or
+        // stalled renderer can no longer starve the control path.
         frameTimer = new AnimationTimer() {
             @Override
             public void handle(long frameNanos) {
-                CraneCommand command = operatorInput.snapshot(System.currentTimeMillis());
-                if (foldSequencer.isActive()) {
-                    command = foldSequencer.next(backend.latestState(), command);
-                }
-                backend.submitCommand(command);
+                CraneCommand command = lastCommand;
                 CraneState state = backend.latestState();
+                if (command == null) {
+                    return;
+                }
                 updateReadouts(command, state);
                 activeView.update(profile, state);
-                // Audio hears only effective demands: deadman released = pump idle.
-                soundEngine.update(state.deadmanHeld()
-                        ? command : CraneCommand.neutral(profile), state);
             }
         };
         frameTimer.start();
+    }
+
+    /**
+     * Produces one operator command every {@value #COMMAND_PERIOD_MILLIS} ms on a
+     * dedicated thread: samples {@link OperatorInput}, lets the auto-sequencer
+     * override it, submits it to the control loop and feeds the sound engine.
+     *
+     * <p>Why not in the frame loop: the safety layer's watchdog stops the crane
+     * when commands go stale (250 ms). Rendering the 3D scene can occasionally
+     * take longer than that, which used to freeze the machine for no reason —
+     * the operator's intent has nothing to do with how busy the GPU is.
+     */
+    private void startCommandThread() {
+        commandThreadRunning = true;
+        commandThread = new Thread(() -> {
+            while (commandThreadRunning) {
+                long started = System.nanoTime();
+                try {
+                    OperatorInput input = operatorInput;
+                    ControlLoopBackend activeBackend = backend;
+                    CraneProfile activeProfile = profile;
+                    if (input != null && activeBackend != null && activeProfile != null) {
+                        CraneCommand command = input.snapshot(System.currentTimeMillis());
+                        if (foldSequencer.isActive()) {
+                            command = foldSequencer.next(activeBackend.latestState(), command);
+                        }
+                        activeBackend.submitCommand(command);
+                        lastCommand = command;
+                        CraneState state = activeBackend.latestState();
+                        if (DIAG) {
+                            diagTick(state);
+                        }
+                        // Audio hears only effective demands: deadman released = pump idle.
+                        soundEngine.update(state.deadmanHeld()
+                                ? command : CraneCommand.neutral(activeProfile), state);
+                    }
+                } catch (RuntimeException e) {
+                    System.err.println("[command] tick failed: " + e);
+                }
+                long elapsedMillis = (System.nanoTime() - started) / 1_000_000L;
+                try {
+                    Thread.sleep(Math.max(1, COMMAND_PERIOD_MILLIS - elapsedMillis));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }, "operator-command");
+        commandThread.setDaemon(true);
+        commandThread.start();
     }
 
     @Override
     public void stop() {
         if (frameTimer != null) {
             frameTimer.stop();
+        }
+        commandThreadRunning = false;
+        if (commandThread != null) {
+            commandThread.interrupt();
         }
         soundEngine.close();
         stopTelemetry();
@@ -264,6 +327,40 @@ public final class CraneRemoteApp extends Application {
         return scroll;
     }
 
+    // ---- TEMP stress diagnostics ----
+    private static final boolean DIAG = System.getProperty("crane.devStress") != null;
+    private long diagLast = System.nanoTime();
+    private int diagTicks;
+
+    private void diagTick(CraneState state) {
+        diagTicks++;
+        long now = System.nanoTime();
+        if (now - diagLast >= 1_000_000_000L) {
+            System.out.printf("[ctl] ticks/s=%d wd=%s dead=%s slew=%.1f boom=%.1f%n",
+                    diagTicks, state.watchdogTripped(), state.deadmanHeld(),
+                    state.position("slew"), state.position("boom"));
+            diagTicks = 0;
+            diagLast = now;
+        }
+    }
+
+    /** TEMP: drives the crane hard in 3D to prove motion survives render stalls. */
+    private void runStressProbe() {
+        javafx.animation.Timeline script = new javafx.animation.Timeline(
+                frameAt(0.5, () -> {
+                    use3d = true;
+                    activeView = view3d;
+                    viewStack.getChildren().set(0, activeView.node());
+                }),
+                frameAt(1.0, () -> {
+                    operatorInput.keyPressed("SPACE");
+                    operatorInput.keyPressed("Q");
+                    operatorInput.keyPressed("W");
+                }),
+                frameAt(12.0, javafx.application.Platform::exit));
+        script.play();
+    }
+
     // ---- dev snapshot probe (visual regression aid, -Dcrane.devSnapshotDir=<dir>) ----
 
     /**
@@ -288,6 +385,10 @@ public final class CraneRemoteApp extends Application {
                     operatorInput.keyReleased("R");
                     operatorInput.keyReleased("T");
                 }),
+                frameAt(4.5, () -> {                 // load on the hook, 2D must show it
+                    cargoChoice = CargoType.CONTAINER;
+                    applyCargo();
+                }),
                 frameAt(4.9, () -> snapshotScene(stage, dir, "02-2d-articulated.png")),
                 frameAt(5.0, () -> {
                     use3d = true;
@@ -295,10 +396,6 @@ public final class CraneRemoteApp extends Application {
                     viewStack.getChildren().set(0, activeView.node());
                 }),
                 frameAt(5.9, () -> snapshotScene(stage, dir, "03-3d-orbit.png")),
-                frameAt(6.0, () -> {
-                    cargoChoice = CargoType.CONTAINER;
-                    view3d.setCargo(cargoChoice);
-                }),
                 frameAt(6.8, () -> snapshotScene(stage, dir, "04-3d-cargo.png")),
                 frameAt(6.9, () -> view3d.setCameraMode(CameraMode.HOOK)),
                 frameAt(8.0, () -> snapshotScene(stage, dir, "05-3d-hook-cam.png")),
@@ -502,7 +599,7 @@ public final class CraneRemoteApp extends Application {
         view2d = new Schematic2DView();
         view3d = new Crane3DView();
         view3d.setCameraMode(cameraChoice);
-        view3d.setCargo(cargoChoice);
+        applyCargo();
 
         viewStack = new StackPane();
         activeView = use3d ? view3d : view2d;
@@ -729,9 +826,15 @@ public final class CraneRemoteApp extends Application {
         box.setValue(cargoChoice);
         box.setOnAction(event -> {
             cargoChoice = box.getValue();
-            view3d.setCargo(cargoChoice);
+            applyCargo();
         });
         return box;
+    }
+
+    /** Both views show the same load, so switching 2D/3D never changes the hook. */
+    private void applyCargo() {
+        view2d.setCargo(cargoChoice);
+        view3d.setCargo(cargoChoice);
     }
 
     private ComboBox<CraneProfile> buildProfileSelector() {

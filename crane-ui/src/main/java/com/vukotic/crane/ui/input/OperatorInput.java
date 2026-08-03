@@ -2,12 +2,12 @@ package com.vukotic.crane.ui.input;
 
 import com.vukotic.crane.core.model.CraneCommand;
 
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Merges the two operator input sources — on-screen sliders and the keyboard —
@@ -18,17 +18,21 @@ import java.util.Set;
  * wins (keyboard wins ties). Key press = full demand of +/-1.0, key release = 0.
  *
  * <p>Plain class, no JavaFX types: the UI feeds it key names
- * ({@code KeyCode.name()}) and slider values. Intended to be used from a single
- * thread (the FX application thread).
+ * ({@code KeyCode.name()}) and slider values.
+ *
+ * <p><b>Thread-safe by design.</b> Input events arrive on the JavaFX thread while
+ * the command submitter samples this object on its own fixed-rate thread — that
+ * separation is what keeps the safety-critical command stream alive when the
+ * renderer stalls (see {@code CraneRemoteApp}).
  */
 public final class OperatorInput {
 
     private final KeyBindings bindings;
     private final List<String> axisIds;
-    private final Map<String, Double> sliderDemands = new HashMap<>();
-    private final Set<String> pressedKeys = new HashSet<>();
-    private boolean estopRequested;
-    private boolean resetRequested;
+    private final Map<String, Double> sliderDemands = new ConcurrentHashMap<>();
+    private final Set<String> pressedKeys = ConcurrentHashMap.newKeySet();
+    private volatile boolean estopRequested;
+    private final AtomicBoolean resetRequested = new AtomicBoolean();
 
     public OperatorInput(KeyBindings bindings, List<String> axisIds) {
         this.bindings = bindings;
@@ -70,7 +74,7 @@ public final class OperatorInput {
      */
     public void requestReset() {
         estopRequested = false;
-        resetRequested = true;
+        resetRequested.set(true);
     }
 
     public boolean deadmanHeld() {
@@ -97,8 +101,7 @@ public final class OperatorInput {
      * (reset is reported exactly once per {@link #requestReset()}).
      */
     public CraneCommand snapshot(long timestampMillis) {
-        boolean reset = resetRequested;
-        resetRequested = false;
+        boolean reset = resetRequested.getAndSet(false);
         return new CraneCommand(timestampMillis, currentDemands(), deadmanHeld(), estopRequested, reset);
     }
 }

@@ -192,6 +192,9 @@ right panel:
   and if you lower it onto the ground it **stays there**. Bring the hook back down to it
   and it picks it back up. (This is decoration: the load has no weight in the physics.)
 
+The load is drawn in **both** views — the 2D view shows it as a labelled silhouette under
+the hook — so switching between 2D and 3D never changes what is on the hook.
+
 ---
 
 ## 8. Recording telemetry

@@ -20,10 +20,11 @@ application {
     mainClass.set("com.vukotic.crane.ui.Launcher")
 }
 
-// Forward the dev snapshot-probe property from the Gradle JVM to the app JVM:
-//   gradlew :crane-ui:run "-Dcrane.devSnapshotDir=<dir>"
+// Forward dev/diagnostic properties from the Gradle JVM to the app JVM, e.g.
+//   gradlew :crane-ui:run "-Dcrane.devSnapshotDir=<dir>" "-Dprism.verbose=true"
 tasks.named<JavaExec>("run") {
-    System.getProperty("crane.devSnapshotDir")?.let { systemProperty("crane.devSnapshotDir", it) }
+    listOf("crane.devSnapshotDir", "crane.devStress", "prism.verbose", "prism.order")
+            .forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 // Self-contained Windows packages via jpackage:
@@ -41,7 +42,7 @@ runtime {
         installerName = "CraneRemoteControl"
         // jpackage rejects a leading 0 in MSI versions, so the package version
         // stays 1.x even while the project is 0.x.
-        appVersion = "2.0.0"
+        appVersion = "2.0.1"
         installerType = "msi"
         installerOptions = listOf(
                 "--vendor", "Vukotic",

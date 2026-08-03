@@ -143,6 +143,18 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       · boat moored within crane reach instead of off-frame
 - [x] DONE — Version 2.0.0, refreshed app-image + MSI, git tag v2.0.0
 
+## V2.0.1 — field fixes
+- [x] DONE — **Motion stopped randomly in 3D**: commands were produced in the render
+      loop, so 300–1600 ms frames exceeded the 250 ms watchdog and froze the crane.
+      Command production moved to a dedicated 50 Hz `operator-command` thread;
+      `OperatorInput` made thread-safe, `AutoSequencer` fields volatile.
+      Verified: `-Dcrane.devStress=true` now drives slew+boom to their limits with
+      zero watchdog trips (previously tripped every few seconds).
+- [x] DONE — 3D render cost cut: antialiasing off, 4 m ground grid instead of 2 m,
+      hydraulic-ram transforms reused instead of reallocated every frame
+- [x] DONE — Cargo now drawn in the 2D view too (same selection drives both views)
+- [x] DONE — Dev stress probe (`-Dcrane.devStress`) kept as the regression reproducer
+
 ## Saved for later (V2 items 8-24)
 - LMI + capacity charts · outriggers/tipping · hydraulic realism · wind · 2-axis sway
 - point-and-lift · geofencing · training mode · replay

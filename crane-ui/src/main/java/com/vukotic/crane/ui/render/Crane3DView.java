@@ -233,7 +233,10 @@ public final class Crane3DView implements CraneSceneView {
                 buildWaterAndDock(), buildStaticShadows(), buildTruck(),
                 hookShadow, superstructure, cargoGroup, cameraRig);
 
-        SubScene subScene = new SubScene(worldRoot, 1, 1, true, SceneAntialiasing.BALANCED);
+        // Antialiasing is deliberately off: multisampling this SubScene cost more
+        // than a whole frame budget on modest GPUs, and a stalled frame used to
+        // starve the control loop's watchdog.
+        SubScene subScene = new SubScene(worldRoot, 1, 1, true, SceneAntialiasing.DISABLED);
         subScene.setFill(new LinearGradient(0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
                 new Stop(0.00, Color.web("#0d1b2a")),
                 new Stop(0.55, Color.web("#294055")),
@@ -558,7 +561,7 @@ public final class Crane3DView implements CraneSceneView {
         PhongMaterial gridMaterial = material(GRID);
         double gridDepth = 44;
         double gridCentreZ = DOCK_EDGE_Z - gridDepth / 2;
-        for (int metre = -30; metre <= 30; metre += 2) {
+        for (int metre = -28; metre <= 28; metre += 4) {   // 4 m grid: half the nodes
             Box alongZ = new Box(0.05, 0.01, gridDepth);
             alongZ.setMaterial(gridMaterial);
             alongZ.setTranslateX(metre);
@@ -785,6 +788,10 @@ public final class Crane3DView implements CraneSceneView {
         private final Group group = new Group();
         private final Cylinder barrel;
         private final Cylinder rod;
+        // Reused every frame — allocating transforms per frame is needless GC
+        // pressure on the thread that also has to render.
+        private final Translate position = new Translate();
+        private final Rotate orientation = new Rotate();
 
         HydraulicRam(double barrelRadius, double rodRadius,
                      PhongMaterial barrelMaterial, PhongMaterial rodMaterial) {
@@ -793,6 +800,7 @@ public final class Crane3DView implements CraneSceneView {
             rod = new Cylinder(rodRadius, 1);
             rod.setMaterial(rodMaterial);
             group.getChildren().addAll(rod, barrel);
+            group.getTransforms().addAll(position, orientation);
         }
 
         Node node() {
@@ -819,9 +827,11 @@ public final class Crane3DView implements CraneSceneView {
             if (axis.magnitude() < 1e-6) {
                 axis = new Point3D(1, 0, 0); // parallel to Y: any perpendicular axis
             }
-            group.getTransforms().setAll(
-                    new Translate(midpoint.getX(), midpoint.getY(), midpoint.getZ()),
-                    new Rotate(angle, axis));
+            position.setX(midpoint.getX());
+            position.setY(midpoint.getY());
+            position.setZ(midpoint.getZ());
+            orientation.setAxis(axis);
+            orientation.setAngle(angle);
         }
     }
 }

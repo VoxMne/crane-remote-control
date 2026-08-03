@@ -70,6 +70,12 @@ public final class SchematicRenderer2D implements CraneRenderer {
     private static final double MAX_ZOOM = 8.0;
 
     // Screen transform of the current frame (render() is single-threaded on the FX thread).
+    private static final Color CARGO_FILL = Color.web("#2f7d8c");
+    private static final Color CARGO_EDGE = Color.web("#63b3c2");
+
+    /** Load drawn on the hook; matches the 3D view's selection. */
+    private volatile CargoType cargo = CargoType.NONE;
+
     private double scale;
     private double canvasWidth; // width of the current frame, for edge-aware labels
     private double originX; // screen x of world x = 0 (pillar base)
@@ -128,6 +134,11 @@ public final class SchematicRenderer2D implements CraneRenderer {
      * the cursor stays put. Uses the last rendered frame's transform; no-op
      * before the first real frame.
      */
+    /** Selects the load drawn under the hook. */
+    public void setCargo(CargoType type) {
+        this.cargo = type == null ? CargoType.NONE : type;
+    }
+
     public void zoomAt(double screenX, double screenY, double factor) {
         if (scale <= 0) {
             return;
@@ -306,6 +317,8 @@ public final class SchematicRenderer2D implements CraneRenderer {
         g.strokeArc(sx(hookX - 0.16), sy(hookY - blockHeight), 0.32 * scale, hookDrop * scale,
                 200, 220, javafx.scene.shape.ArcType.OPEN);
 
+        drawCargo(g, hookX, hookY - blockHeight - hookDrop);
+
         // Live annotation beside the hook: horizontal outreach from the slew
         // axis (world x = 0) and hook height above ground — the same world
         // coordinates the hook was just drawn from.
@@ -319,6 +332,38 @@ public final class SchematicRenderer2D implements CraneRenderer {
         g.fillText(readout,
                 flip ? sx(hookX - blockWidth) - 4 : sx(hookX + blockWidth) + 4,
                 sy(hookY - blockHeight / 2));
+        g.setTextAlign(TextAlignment.LEFT);
+    }
+
+    /**
+     * The selected load hanging under the hook, in side view: a silhouette in
+     * the cargo's own colour with a dimension label. Mirrors what the 3D view
+     * shows, so switching views never changes what is on the hook.
+     *
+     * @param topY world height of the cargo's top face (the hook's underside)
+     */
+    private void drawCargo(GraphicsContext g, double centreX, double topY) {
+        CargoType type = cargo;
+        if (type == CargoType.NONE) {
+            return;
+        }
+        // Rest on the ground once lowered, exactly like the 3D view's cargo.
+        double height = type.height();
+        double bottomY = Math.max(0.0, topY - height);
+        double drawTopY = bottomY + height;
+        double length = type.length();
+
+        g.setFill(CARGO_FILL);
+        g.fillRect(sx(centreX - length / 2), sy(drawTopY), length * scale, height * scale);
+        g.setStroke(CARGO_EDGE);
+        g.setLineWidth(1.5);
+        g.strokeRect(sx(centreX - length / 2), sy(drawTopY), length * scale, height * scale);
+
+        g.setFill(ANNOTATION_TEXT);
+        g.setFont(ANNOTATION_FONT);
+        g.setTextAlign(TextAlignment.CENTER);
+        g.setTextBaseline(VPos.CENTER);
+        g.fillText(type.label(), sx(centreX), sy(drawTopY - height / 2));
         g.setTextAlign(TextAlignment.LEFT);
     }
 

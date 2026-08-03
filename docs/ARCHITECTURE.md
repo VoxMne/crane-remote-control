@@ -154,7 +154,22 @@ of the 2D view, 3D view and E-STOP state into the directory, then exits. Used fo
 visual verification/regression; inert without the property.
 
 ## Threading
-ControlLoop runs on its own scheduled thread at fixed tick; UI reads the latest published
-`CraneState` via `javafx.application.Platform.runLater` or an `AnimationTimer` polling an
-`AtomicReference<CraneState>`. Commands flow UI → loop through a thread-safe holder the
-loop samples each tick.
+Three threads, deliberately separated:
+
+1. **`control-loop`** (crane-core) — fixed 50 Hz: safety, driver I/O, publishes `CraneState`.
+2. **`operator-command`** (crane-ui) — fixed 50 Hz: samples `OperatorInput`, runs the
+   `AutoSequencer`, submits the command, feeds the `SoundEngine`.
+3. **JavaFX application thread** — *drawing only*: reads the last command + latest state
+   and repaints.
+
+**Why the command thread exists.** It used to live in the `AnimationTimer`, so commands
+were only produced as fast as the scene could be drawn. A 3D frame occasionally took
+300–1600 ms, which is longer than the safety layer's 250 ms watchdog — the crane kept
+stopping because the GPU was busy. Operator intent has nothing to do with render cost,
+so command production was moved to its own fixed-rate thread. `OperatorInput` is
+therefore thread-safe (concurrent collections + `AtomicBoolean` for the one-shot reset),
+and `AutoSequencer`'s state fields are `volatile` (started/cancelled from the UI thread,
+advanced on the command thread).
+
+The 3D scene was also made cheaper (antialiasing off, coarser ground grid, transforms
+reused instead of reallocated per frame) so frames stay well inside budget.
