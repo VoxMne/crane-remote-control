@@ -11,12 +11,52 @@
     -fx-font-family: "Segoe UI", sans-serif;
 }
 
+/* Touch-friendly: bigger hit targets for gloved/tablet operation. */
 .slider .track {
     -fx-background-color: #10151a;
+    -fx-pref-height: 8px;
 }
 
 .slider .thumb {
     -fx-background-color: #e8b716;
+    -fx-padding: 9px;
+}
+
+.button, .toggle-button, .combo-box {
+    -fx-min-height: 34px;
+}
+
+/* Axis position bar meters. */
+.progress-bar {
+    -fx-indeterminate-bar-animation-time: 0;
+}
+
+.progress-bar > .track {
+    -fx-background-color: #10151a;
+    -fx-background-radius: 3;
+    -fx-background-insets: 0;
+}
+
+.progress-bar > .bar {
+    -fx-background-color: #e8b716;
+    -fx-background-radius: 3;
+    -fx-background-insets: 1;
+    -fx-padding: 4px;
+}
+
+/* SplitPane: thin, dark, draggable dividers. */
+.split-pane {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.split-pane > .split-pane-divider {
+    -fx-background-color: #14181d;
+    -fx-padding: 0 3px 0 3px;
+}
+
+.split-pane > .split-pane-divider:hover {
+    -fx-background-color: #2a3440;
 }
 
 .list-view {

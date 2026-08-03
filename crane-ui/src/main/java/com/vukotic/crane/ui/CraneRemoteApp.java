@@ -16,6 +16,7 @@ import com.vukotic.crane.ui.input.OperatorInput;
 import com.vukotic.crane.ui.render.Crane3DView;
 import com.vukotic.crane.ui.render.CraneSceneView;
 import com.vukotic.crane.ui.render.Schematic2DView;
+import com.vukotic.crane.ui.sound.SoundEngine;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.collections.FXCollections;
@@ -23,14 +24,19 @@ import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.canvas.Canvas;
+import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.control.Slider;
+import javafx.scene.control.SplitPane;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.ToggleGroup;
+import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
@@ -39,6 +45,7 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.ArcType;
 import javafx.scene.shape.Circle;
 import javafx.stage.Stage;
 import javafx.util.StringConverter;
@@ -129,11 +136,24 @@ public final class CraneRemoteApp extends Application {
     private static final String DRIVER_SERIAL_PREFIX = "Serial: ";
     private String driverChoice = DRIVER_SIMULATOR;
 
+    // HMI 2.0: resizable shell, gauges, synthesized cockpit audio.
+    private Stage stage;
+    private SplitPane mainSplit;
+    private final SoundEngine soundEngine = new SoundEngine();
+    private ToggleButton muteButton;
+    private Canvas slewDial;
+    private final Map<String, ProgressBar> positionBars = new HashMap<>();
+
     @Override
     public void start(Stage stage) {
+        this.stage = stage;
         root = new BorderPane();
         root.setStyle("-fx-background-color: " + BG + ";");
-        // The center view is built per profile in activateProfile().
+        mainSplit = new SplitPane();
+        mainSplit.setStyle("-fx-background-color: " + BG + "; -fx-background-insets: 0;"
+                + " -fx-padding: 4;");
+        root.setCenter(mainSplit);
+        // The three panes are (re)built per profile in activateProfile().
 
         Scene scene = new Scene(root, 1280, 800);
         scene.getStylesheets().add(getClass().getResource("/hmi.css").toExternalForm());
@@ -163,6 +183,9 @@ public final class CraneRemoteApp extends Application {
                 CraneState state = backend.latestState();
                 updateReadouts(command, state);
                 activeView.update(profile, state);
+                // Audio hears only effective demands: deadman released = pump idle.
+                soundEngine.update(state.deadmanHeld()
+                        ? command : CraneCommand.neutral(profile), state);
             }
         };
         frameTimer.start();
@@ -173,6 +196,7 @@ public final class CraneRemoteApp extends Application {
         if (frameTimer != null) {
             frameTimer.stop();
         }
+        soundEngine.close();
         stopTelemetry();
         if (backend != null) {
             backend.stop();
@@ -212,12 +236,9 @@ public final class CraneRemoteApp extends Application {
         alarmItems.clear();
         previousAlarms = Set.of();
 
-        root.setLeft(buildControlPanel());
-        root.setCenter(buildCenterPane());
-        root.setRight(buildStatusPanel());
-        BorderPane.setMargin(root.getLeft(), new Insets(10, 0, 10, 10));
-        BorderPane.setMargin(root.getCenter(), new Insets(10));
-        BorderPane.setMargin(root.getRight(), new Insets(10, 10, 10, 0));
+        positionBars.clear();
+        mainSplit.getItems().setAll(buildControlPanel(), buildCenterPane(), buildStatusPanel());
+        mainSplit.setDividerPositions(0.235, 0.75);
     }
 
     // ---- dev snapshot probe (visual regression aid, -Dcrane.devSnapshotDir=<dir>) ----
@@ -306,7 +327,9 @@ public final class CraneRemoteApp extends Application {
         VBox panel = new VBox(12);
         panel.setPadding(new Insets(14));
         panel.setPrefWidth(300);
+        panel.setMinWidth(264);
         panel.setStyle("-fx-background-color: " + PANEL_BG + "; -fx-background-radius: 6;");
+        SplitPane.setResizableWithParent(panel, false);
 
         panel.getChildren().add(sectionLabel("CONTROLS"));
         for (AxisSpec axis : profile.axes()) {
@@ -347,7 +370,13 @@ public final class CraneRemoteApp extends Application {
         deadmanIndicator.setMinHeight(34);
         deadmanIndicator.setStyle(deadmanStyle(false));
 
-        panel.getChildren().addAll(spacer, estopButton, resetButton, deadmanIndicator);
+        Label fullscreenHint = new Label("F11 — fullscreen · drag panel edges to resize");
+        fullscreenHint.setMaxWidth(Double.MAX_VALUE);
+        fullscreenHint.setAlignment(Pos.CENTER);
+        fullscreenHint.setStyle("-fx-text-fill: #566470; -fx-font-size: 10px;");
+
+        panel.getChildren().addAll(spacer, estopButton, resetButton, deadmanIndicator,
+                fullscreenHint);
         return panel;
     }
 
@@ -481,7 +510,9 @@ public final class CraneRemoteApp extends Application {
         VBox panel = new VBox(10);
         panel.setPadding(new Insets(14));
         panel.setPrefWidth(320);
+        panel.setMinWidth(300);
         panel.setStyle("-fx-background-color: " + PANEL_BG + "; -fx-background-radius: 6;");
+        SplitPane.setResizableWithParent(panel, false);
 
         panel.getChildren().add(sectionLabel("PROFILE"));
         panel.getChildren().add(buildProfileSelector());
@@ -494,13 +525,35 @@ public final class CraneRemoteApp extends Application {
             value.setStyle(readoutStyle(TEXT));
             positionReadouts.put(axis.id(), value);
 
-            Label name = new Label(axis.label());
-            name.setStyle("-fx-text-fill: " + TEXT_DIM + "; -fx-font-size: 12px;");
-            Region gap = new Region();
-            HBox.setHgrow(gap, Priority.ALWAYS);
-            HBox row = new HBox(6, name, gap, value);
-            row.setAlignment(Pos.CENTER_LEFT);
-            panel.getChildren().add(row);
+            if (axis.id().equals("slew")) {
+                // Radial dial for the slew ring; the numeric readout sits below it.
+                slewDial = new Canvas(112, 96);
+                Label name = new Label(axis.label());
+                name.setStyle("-fx-text-fill: " + TEXT_DIM + "; -fx-font-size: 12px;");
+                Region gap = new Region();
+                HBox.setHgrow(gap, Priority.ALWAYS);
+                HBox caption = new HBox(6, name, gap, value);
+                caption.setAlignment(Pos.CENTER_LEFT);
+                VBox dialBox = new VBox(2, slewDial, caption);
+                dialBox.setAlignment(Pos.CENTER);
+                panel.getChildren().add(dialBox);
+            } else {
+                // Bar meter: label | position-in-range bar | numeric readout.
+                Label name = new Label(axis.label());
+                name.setStyle("-fx-text-fill: " + TEXT_DIM + "; -fx-font-size: 11px;");
+                name.setMinWidth(88);
+                ProgressBar bar = new ProgressBar(0);
+                bar.setMaxWidth(Double.MAX_VALUE);
+                bar.setPrefHeight(10);
+                bar.setFocusTraversable(false);
+                HBox.setHgrow(bar, Priority.ALWAYS);
+                positionBars.put(axis.id(), bar);
+                value.setMinWidth(64);
+                value.setAlignment(Pos.CENTER_RIGHT);
+                HBox row = new HBox(6, name, bar, value);
+                row.setAlignment(Pos.CENTER_LEFT);
+                panel.getChildren().add(row);
+            }
         }
 
         panel.getChildren().add(sectionLabel("SAFETY"));
@@ -528,6 +581,22 @@ public final class CraneRemoteApp extends Application {
         recordInfo.setWrapText(true);
         recordInfo.setStyle("-fx-text-fill: " + TEXT_DIM + "; -fx-font-size: 11px;");
         panel.getChildren().addAll(recordButton, recordInfo);
+
+        panel.getChildren().add(sectionLabel("SOUND"));
+        muteButton = new ToggleButton("MUTE");
+        muteButton.setFocusTraversable(false);
+        muteButton.setMaxWidth(Double.MAX_VALUE);
+        muteButton.setSelected(soundEngine.isMuted());
+        muteButton.setStyle(recStyle(soundEngine.isMuted()));
+        muteButton.selectedProperty().addListener((obs, was, selected) -> {
+            soundEngine.setMuted(selected);
+            muteButton.setStyle(recStyle(selected));
+        });
+        if (!soundEngine.isAvailable()) {
+            muteButton.setDisable(true);
+            muteButton.setText("NO AUDIO DEVICE");
+        }
+        panel.getChildren().add(muteButton);
 
         panel.getChildren().add(sectionLabel("ACTIVE ALARMS"));
         ListView<String> alarmList = alarmListView(alarmItems, ALARM_RED);
@@ -650,6 +719,11 @@ public final class CraneRemoteApp extends Application {
 
     private void installKeyHandlers(Scene scene) {
         scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.getCode() == KeyCode.F11) {
+                stage.setFullScreen(!stage.isFullScreen());
+                event.consume();
+                return;
+            }
             String key = event.getCode().name();
             if (keyBindings.isEstopKey(key)) {
                 estopButton.setSelected(true); // listener forwards to operatorInput
@@ -673,8 +747,19 @@ public final class CraneRemoteApp extends Application {
     private void updateReadouts(CraneCommand command, CraneState state) {
         for (AxisSpec axis : profile.axes()) {
             demandReadouts.get(axis.id()).setText(String.format("%+.2f", command.demand(axis.id())));
+            double position = state.position(axis.id());
             positionReadouts.get(axis.id())
-                    .setText(String.format("%.2f %s", state.position(axis.id()), axis.unit()));
+                    .setText(String.format("%.2f %s", position, axis.unit()));
+
+            ProgressBar bar = positionBars.get(axis.id());
+            if (bar != null) {
+                double span = axis.maxPosition() - axis.minPosition();
+                bar.setProgress(Math.clamp((position - axis.minPosition()) / span, 0.0, 1.0));
+            }
+        }
+        if (slewDial != null) {
+            profile.axisById("slew")
+                    .ifPresent(axis -> drawSlewDial(axis, state.position("slew")));
         }
         estopLamp.setFill(state.estopLatched() ? Color.web(ALARM_RED) : LAMP_OFF);
         deadmanLamp.setFill(state.deadmanHeld() ? Color.web(OK_GREEN) : LAMP_OFF);
@@ -687,6 +772,51 @@ public final class CraneRemoteApp extends Application {
         }
         recordAlarmHistory(state);
         updateFoldStatus();
+    }
+
+    /**
+     * Radial slew gauge: the axis range drawn as an arc with 0° at the top and
+     * positive angles clockwise (same convention as the 2D top view), an amber
+     * needle at the current angle, and end stops marked in red.
+     */
+    private void drawSlewDial(AxisSpec axis, double angleDeg) {
+        GraphicsContext g = slewDial.getGraphicsContext2D();
+        double w = slewDial.getWidth();
+        double h = slewDial.getHeight();
+        double cx = w / 2;
+        double cy = h / 2 + 6;
+        double radius = Math.min(w, h * 1.6) / 2 - 10;
+
+        g.clearRect(0, 0, w, h);
+
+        // JavaFX arcs: 0° = east, counter-clockwise. Our 0° = north, clockwise.
+        double startFx = 90 - axis.minPosition();
+        double extentFx = -(axis.maxPosition() - axis.minPosition());
+        g.setStroke(Color.web("#39434c"));
+        g.setLineWidth(6);
+        g.strokeArc(cx - radius, cy - radius, radius * 2, radius * 2,
+                startFx, extentFx, ArcType.OPEN);
+
+        g.setStroke(Color.web(ALARM_RED));
+        g.setLineWidth(2);
+        for (double stop : new double[]{axis.minPosition(), axis.maxPosition()}) {
+            double rad = Math.toRadians(90 - stop);
+            g.strokeLine(cx + Math.cos(rad) * (radius - 6), cy - Math.sin(rad) * (radius - 6),
+                    cx + Math.cos(rad) * (radius + 4), cy - Math.sin(rad) * (radius + 4));
+        }
+
+        g.setStroke(Color.web("#566470"));
+        g.setLineWidth(1.5);
+        g.strokeLine(cx, cy - radius - 4, cx, cy - radius + 3); // 0° reference tick
+
+        double needleRad = Math.toRadians(90 - Math.clamp(angleDeg,
+                axis.minPosition(), axis.maxPosition()));
+        g.setStroke(Color.web(AMBER));
+        g.setLineWidth(3);
+        g.strokeLine(cx, cy,
+                cx + Math.cos(needleRad) * (radius - 3), cy - Math.sin(needleRad) * (radius - 3));
+        g.setFill(Color.web(AMBER));
+        g.fillOval(cx - 3.5, cy - 3.5, 7, 7);
     }
 
     /** Keeps the FOLD button and its status line in sync with the sequencer. */
