@@ -85,8 +85,11 @@ absent) and show the E-STOP banner.
 
 ## 3D world (M5)
 Everything is procedural — `MeshFactory` builds `TriangleMesh` shapes (tapered,
-chamfered beam sections; a stylised boat hull), emitting each triangle in both winding
-orders so faces light correctly from either side. The scene adds animated hydraulic
+chamfered beam sections; a stylised boat hull). Each triangle is emitted once, oriented
+outward from a reference point inside the solid, with an explicit face normal
+(`POINT_NORMAL_TEXCOORD`, flat shading) and `CullFace.NONE`. Emitting both windings
+instead — the original shortcut — left coincident triangles that z-fought into stippled
+garbage on some GPUs while the opposed normals averaged to zero. The scene adds animated hydraulic
 rams (`HydraulicRam` spans two anchor points computed per frame from the joint angles),
 a detailed truck, a gradient sky with sun + key light, blob shadows including one that
 tracks the hook, and a dock with water and a moored, gently bobbing boat.

@@ -385,8 +385,10 @@ public final class CraneRemoteApp extends Application {
                     operatorInput.keyReleased("R");
                     operatorInput.keyReleased("T");
                 }),
-                frameAt(4.5, () -> {                 // load on the hook, 2D must show it
-                    cargoChoice = CargoType.CONTAINER;
+                frameAt(4.5, () -> {
+                    // BOAT on purpose: it exercises the hull mesh, the shape that
+                    // rendered as stippled garbage before MeshFactory was fixed.
+                    cargoChoice = CargoType.BOAT;
                     applyCargo();
                 }),
                 frameAt(4.9, () -> snapshotScene(stage, dir, "02-2d-articulated.png")),

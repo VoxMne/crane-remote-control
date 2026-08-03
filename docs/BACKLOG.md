@@ -155,6 +155,19 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — Cargo now drawn in the 2D view too (same selection drives both views)
 - [x] DONE — Dev stress probe (`-Dcrane.devStress`) kept as the regression reproducer
 
+## V2.0.2 — mesh corruption fix (reported from the field)
+- [x] DONE — **3D shapes rendered as stippled garbage / exploded white masses on
+      some GPUs** (boom drawn as a fan, boat hull blown apart). Cause: MeshFactory
+      emitted every triangle twice in opposite winding orders, leaving coincident
+      triangles that z-fight, and opposed face normals that average to zero so
+      lighting blew out. Only mesh shapes were affected — Box/Cylinder primitives
+      (truck, pillar, wheels) always rendered fine, which is what pinpointed it.
+- [x] DONE — Each triangle now emitted once, oriented outward from an interior
+      reference point, with explicit per-face normals (POINT_NORMAL_TEXCOORD,
+      flat shading) and CullFace.NONE so no surface can vanish
+- [x] DONE — Snapshot probe now loads the BOAT cargo, exercising the hull mesh
+      that failed, as a permanent regression shot
+
 ## Saved for later (V2 items 8-24)
 - LMI + capacity charts · outriggers/tipping · hydraulic realism · wind · 2-axis sway
 - point-and-lift · geofencing · training mode · replay
