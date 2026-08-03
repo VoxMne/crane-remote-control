@@ -65,6 +65,15 @@ excited by a heuristic boom-tip speed, and publishes it as extra state map entri
 - UI never mutates state directly — it only produces `CraneCommand`s for the ControlLoop
   and renders the `CraneState` the loop publishes.
 
+## 2D pro view (M5)
+`SchematicRenderer2D` owns an explicit viewport (world centre + scale). Untouched it
+auto-fits to the canvas exactly as before (the snapshot probe depends on that); the
+view drives `zoomAt` / `panByScreenDelta` / `resetViewport` from scroll, drag and
+double-click. Measurement overlays: dashed reach arcs (max tip envelope + current
+radius) around the pillar pivot, an adaptive height tick scale, a live
+outreach/height readout beside the hook, and a zoom-adaptive scale bar. The top-view
+slew inset keeps its own fixed layout, unaffected by zoom/pan.
+
 ## 3D view (M4)
 The center visualization sits behind `CraneSceneView` (`node()` + per-frame `update()`):
 `Schematic2DView` wraps the existing canvas renderer; `Crane3DView` is a JavaFX 3D

@@ -118,9 +118,10 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [ ] TODO — Scope guard: crane-ui render package ONLY; CraneRemoteApp untouched
 
 ## M5b — 2D pro view (branch `feature/render2d-pro`) — V2 item 5
-- [ ] TODO — Zoom (scroll) + pan (drag) inside Schematic2DView, double-click = fit
-- [ ] TODO — Reach circles (max outreach arcs), height markers, live hook
-      outreach/height annotation next to the hook
+- [x] DONE — Explicit viewport in the renderer: zoom-at-cursor (scroll), pan (drag),
+      double-click resets to auto-fit; untouched viewport keeps auto-fitting
+- [x] DONE — Dashed reach arcs (max + current), adaptive height tick scale, live
+      "out / h" readout beside the hook, zoom-adaptive scale bar
 - [ ] TODO — Capacity chart overlay deferred to the LMI feature (V2 item 8, later)
 - [ ] TODO — Scope guard: render package ONLY; CraneRemoteApp untouched
 
