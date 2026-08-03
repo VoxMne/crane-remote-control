@@ -102,5 +102,49 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — 2D/3D toggle moved top-left (was covering the top-view inset)
 - [x] DONE — Version 1.0.0, refreshed app-image + MSI, git tag v1.0.0
 
+## M5a — 3D world overhaul (branch `feature/world3d`) — V2 items 1,2,3,4
+- [ ] TODO — Procedural-mesh crane (TriangleMesh: tapered boom sections, chamfers),
+      animated hydraulic cylinders (boom + jib rams that visibly extend), detailed
+      truck (cab with window faces, wheel rims). NO external asset files.
+- [ ] TODO — Environment: gradient sky fill, sun (bright sphere + point light), blob
+      shadows under crane/load, dock at one side, translucent water plane, procedural
+      boat hull floating in the water
+- [ ] TODO — Cargo: enum CargoType { NONE, PALLET, CONTAINER, BOAT }; selected cargo
+      hangs from the hook (follows sway), rests on the ground when lowered onto it,
+      re-attaches when raised — purely visual state machine inside the 3D view
+- [ ] TODO — Cameras: enum CameraMode { ORBIT, CAB, HOOK, FOLLOW } with smooth
+      transitions. FROZEN PUBLIC API on Crane3DView for integration:
+      setCameraMode(CameraMode), cameraMode(), setCargo(CargoType), cargo()
+- [ ] TODO — Scope guard: crane-ui render package ONLY; CraneRemoteApp untouched
+
+## M5b — 2D pro view (branch `feature/render2d-pro`) — V2 item 5
+- [ ] TODO — Zoom (scroll) + pan (drag) inside Schematic2DView, double-click = fit
+- [ ] TODO — Reach circles (max outreach arcs), height markers, live hook
+      outreach/height annotation next to the hook
+- [ ] TODO — Capacity chart overlay deferred to the LMI feature (V2 item 8, later)
+- [ ] TODO — Scope guard: render package ONLY; CraneRemoteApp untouched
+
+## M5c — HMI theme 2.0 + sound (branch `feature/hmi2-sound`) — V2 items 6,7
+- [ ] TODO — Gauges: radial slew dial + per-axis position bar meters in the status
+      panel (replacing plain text rows, keeping the numeric readouts)
+- [ ] TODO — Resizable panels (SplitPane), F11 fullscreen operator mode,
+      touch-friendly control sizing
+- [ ] TODO — SoundEngine: javax.sound.sampled, ALL sounds synthesized in code (no
+      asset files): hydraulic hum pitched by total demand, motion beeper, E-STOP/
+      watchdog alarm buzzer; MUTE toggle in the UI
+- [ ] TODO — Scope guard: keep snapshot probe, assists, fold, driver/profile wiring
+      fully intact; restyle around them
+
+## M5d — V2 integration (on main, after merges)
+- [ ] TODO — CAMERA + CARGO selectors wired into the restyled UI
+- [ ] TODO — Snapshot-probe visual verification of all views; fix findings
+- [ ] TODO — Version 2.0.0, refreshed app-image + MSI, git tag v2.0.0
+
+## Saved for later (V2 items 8-24)
+- LMI + capacity charts · outriggers/tipping · hydraulic realism · wind · 2-axis sway
+- point-and-lift · geofencing · training mode · replay
+- gamepad · Arduino/ESP32 firmware · tablet HMI
+- profile editor · CI · logging/crash bundles · localization · code signing/licensing
+
 ## Skipped for now (no equipment)
 - gamepad/joystick input · Arduino/MCU firmware in C
