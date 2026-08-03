@@ -42,5 +42,7 @@ that can be set down and picked back up; radial + bar gauges; synthesized cockpi
 (hydraulic hum, motion beeper, alarm buzzer) with a MUTE toggle.
 
 ## Docs
+- **[User Guide](docs/USER_GUIDE.md) — start here if you just want to drive the crane**
 - [Vision](docs/VISION.md) · [Architecture](docs/ARCHITECTURE.md) ·
-  [Roadmap](docs/ROADMAP.md) · [Backlog / task board](docs/BACKLOG.md)
+  [Protocol](docs/PROTOCOL.md) · [Roadmap](docs/ROADMAP.md) ·
+  [Backlog / task board](docs/BACKLOG.md)
