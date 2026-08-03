@@ -1,5 +1,6 @@
 package com.vukotic.crane.ui.render;
 
+import com.vukotic.crane.core.model.AxisSpec;
 import com.vukotic.crane.core.model.CraneProfile;
 import com.vukotic.crane.core.model.CraneState;
 import javafx.scene.canvas.GraphicsContext;
@@ -9,6 +10,8 @@ import javafx.scene.text.FontWeight;
 import javafx.scene.text.TextAlignment;
 import javafx.geometry.VPos;
 
+import java.util.Locale;
+
 /**
  * 2D schematic of a truck-mounted knuckle-boom crane.
  *
@@ -16,7 +19,20 @@ import javafx.geometry.VPos;
  * (rotated by the "boom" axis, lengthened by "extension"), jib rotated by
  * "jib" relative to the boom, and a hook hanging from the jib tip by the
  * "winch" rope length. Top view (inset, top-right): truck outline and boom
- * direction rotated by "slew".
+ * direction rotated by "slew". The inset lives in fixed screen space and is
+ * never affected by the viewport.
+ *
+ * <p>The side view renders through an explicit viewport (world centre + zoom
+ * over the auto-fit scale). While untouched, the viewport auto-fits and keeps
+ * following canvas resizes — byte-for-byte the classic framing, which the dev
+ * snapshot probe relies on. {@link #zoomAt}, {@link #panByScreenDelta} and
+ * {@link #resetViewport} are mutated by {@link Schematic2DView}'s mouse
+ * handlers on the FX thread.
+ *
+ * <p>Measurement annotations (dim, thin, small monospace — never louder than
+ * the crane): dashed reach arcs around the pillar pivot, an adaptive height
+ * tick scale on the left edge, a live outreach/height readout beside the hook
+ * and a zoom-adaptive scale bar in the bottom-left corner.
  *
  * <p>All geometry is read from {@link CraneState} positions via the axis ids
  * {@code slew, boom, jib, extension, winch}; missing axes read as 0. Visual
@@ -45,11 +61,29 @@ public final class SchematicRenderer2D implements CraneRenderer {
     private static final Color JOINT = Color.web("#14181d");
     private static final Color TEXT_DIM = Color.web("#9aa7b0");
     private static final Color ALARM_RED = Color.web("#d64541");
+    private static final Color ANNOTATION = Color.web("#4d5a66");       // dim measure lines
+    private static final Color ANNOTATION_TEXT = Color.web("#84919d");  // small measure labels
+    private static final Font ANNOTATION_FONT = Font.font("Monospaced", 11);
+
+    // ---- viewport limits (zoom is a multiplier over the auto-fit scale) ----
+    private static final double MIN_ZOOM = 0.3;
+    private static final double MAX_ZOOM = 8.0;
 
     // Screen transform of the current frame (render() is single-threaded on the FX thread).
     private double scale;
     private double originX; // screen x of world x = 0 (pillar base)
     private double groundY; // screen y of world y = 0 (ground)
+    private double fitScale;   // auto-fit scale of the current canvas size
+    private double lastWidth;
+    private double lastHeight;
+
+    // User viewport: world point at the canvas centre + zoom over the fit scale.
+    // Inactive (default, and after a double-click reset) = classic auto-fit framing
+    // that keeps adapting to canvas resizes.
+    private boolean userViewport;
+    private double viewCenterX;
+    private double viewCenterY;
+    private double zoom = 1.0;
 
     @Override
     public void render(GraphicsContext g, double width, double height, CraneProfile profile, CraneState state) {
@@ -59,18 +93,83 @@ public final class SchematicRenderer2D implements CraneRenderer {
             return;
         }
 
-        scale = Math.min(width / WORLD_WIDTH, height / WORLD_HEIGHT);
-        originX = width * 0.32;
-        groundY = height * 0.88;
+        fitScale = Math.min(width / WORLD_WIDTH, height / WORLD_HEIGHT);
+        if (userViewport) {
+            scale = fitScale * zoom;
+            originX = width / 2 - viewCenterX * scale;
+            groundY = height / 2 + viewCenterY * scale;
+        } else {
+            scale = fitScale;
+            originX = width * 0.32;
+            groundY = height * 0.88;
+        }
+        lastWidth = width;
+        lastHeight = height;
 
         drawGrid(g, width, height);
+        drawReachArcs(g, profile, state);
         drawGroundAndTruck(g, width);
         drawCraneSideView(g, state);
+        drawHeightMarkers(g, height);
+        drawScaleBar(g, height);
         drawTopViewInset(g, width, state);
 
         if (state.estopLatched()) {
             drawEstopBanner(g, width, height);
         }
+    }
+
+    // ---- viewport control (called from Schematic2DView's mouse handlers) ----
+
+    /**
+     * Zooms by {@code factor} anchored on a screen point: the world point under
+     * the cursor stays put. Uses the last rendered frame's transform; no-op
+     * before the first real frame.
+     */
+    public void zoomAt(double screenX, double screenY, double factor) {
+        if (scale <= 0) {
+            return;
+        }
+        beginUserViewport();
+        double anchorWorldX = (screenX - originX) / scale;
+        double anchorWorldY = (groundY - screenY) / scale;
+        zoom = Math.clamp(zoom * factor, MIN_ZOOM, MAX_ZOOM);
+        double newScale = fitScale * zoom;
+        viewCenterX = anchorWorldX + (lastWidth / 2 - screenX) / newScale;
+        viewCenterY = anchorWorldY + (screenY - lastHeight / 2) / newScale;
+        // Keep the frame transform coherent for further events before the next render.
+        scale = newScale;
+        originX = lastWidth / 2 - viewCenterX * scale;
+        groundY = lastHeight / 2 + viewCenterY * scale;
+    }
+
+    /** Pans by a screen-pixel delta: the world follows the cursor drag. */
+    public void panByScreenDelta(double dxPixels, double dyPixels) {
+        if (scale <= 0) {
+            return;
+        }
+        beginUserViewport();
+        viewCenterX -= dxPixels / scale;
+        viewCenterY += dyPixels / scale;
+        originX += dxPixels;
+        groundY += dyPixels;
+    }
+
+    /** Back to the auto-fit framing (which keeps following canvas resizes). */
+    public void resetViewport() {
+        userViewport = false;
+        zoom = 1.0;
+    }
+
+    /** Captures the current auto-fit framing as the starting user viewport. */
+    private void beginUserViewport() {
+        if (userViewport) {
+            return;
+        }
+        userViewport = true;
+        zoom = 1.0;
+        viewCenterX = (lastWidth / 2 - originX) / scale;
+        viewCenterY = (groundY - lastHeight / 2) / scale;
     }
 
     // ---- world-to-screen helpers (side view) ----
@@ -88,7 +187,17 @@ public final class SchematicRenderer2D implements CraneRenderer {
     private void drawGrid(GraphicsContext g, double width, double height) {
         g.setStroke(GRID);
         g.setLineWidth(1);
-        for (int metre = 0; metre <= WORLD_HEIGHT; metre += 2) {
+        // Default framing draws the classic fixed window; a user viewport covers
+        // whatever 2 m lines are actually visible (bounded by the canvas, so the
+        // loop never explodes however far the view was panned).
+        int firstMetre = 0;
+        int lastMetre = (int) WORLD_HEIGHT;
+        if (userViewport) {
+            firstMetre = Math.max(0, 2 * (int) Math.ceil((groundY - height) / scale / 2));
+            lastMetre = Math.max(lastMetre, 2 * (int) Math.floor(groundY / scale / 2));
+            lastMetre = Math.min(lastMetre, firstMetre + 2 * (int) Math.ceil(height / scale / 2) + 2);
+        }
+        for (int metre = firstMetre; metre <= lastMetre; metre += 2) {
             double y = sy(metre);
             if (y > 0 && y < height) {
                 g.strokeLine(0, y, width, y);
@@ -194,6 +303,16 @@ public final class SchematicRenderer2D implements CraneRenderer {
         g.setLineWidth(Math.max(1.5, 0.07 * scale));
         g.strokeArc(sx(hookX - 0.16), sy(hookY - blockHeight), 0.32 * scale, hookDrop * scale,
                 200, 220, javafx.scene.shape.ArcType.OPEN);
+
+        // Live annotation beside the hook: horizontal outreach from the slew
+        // axis (world x = 0) and hook height above ground — the same world
+        // coordinates the hook was just drawn from.
+        g.setFill(ANNOTATION_TEXT);
+        g.setFont(ANNOTATION_FONT);
+        g.setTextAlign(TextAlignment.LEFT);
+        g.setTextBaseline(VPos.CENTER);
+        g.fillText("out " + fmt(hookX) + " m / h " + fmt(hookY) + " m",
+                sx(hookX + blockWidth) + 4, sy(hookY - blockHeight / 2));
     }
 
     private void drawJoint(GraphicsContext g, double worldX, double worldY, double radiusMetres) {
@@ -203,6 +322,129 @@ public final class SchematicRenderer2D implements CraneRenderer {
         double r = radiusMetres * scale;
         g.fillOval(sx(worldX) - r / 2, sy(worldY) - r / 2, r, r);
         g.strokeOval(sx(worldX) - r / 2, sy(worldY) - r / 2, r, r);
+    }
+
+    // ---- measurement annotations (dim, thin, small monospace) ----
+
+    /**
+     * Dashed reach arcs centred on the pillar pivot: the maximum tip radius
+     * (boom base + the profile's extension limit + jib, fully straight) and
+     * the current tip radius, both labelled in metres. The radius equals the
+     * horizontal outreach when the boom is level — the arc is the tip envelope.
+     */
+    private void drawReachArcs(GraphicsContext g, CraneProfile profile, CraneState state) {
+        double pivotY = BED_HEIGHT + PILLAR_HEIGHT;
+        double maxExtension = profile.axisById("extension")
+                .map(AxisSpec::maxPosition).orElse(0.0);
+        double maxReach = BOOM_BASE_LENGTH + maxExtension + JIB_LENGTH;
+
+        // Current tip radius from the pivot — the same articulation the boom
+        // and jib are drawn with in drawCraneSideView.
+        double boomRad = Math.toRadians(state.position("boom"));
+        double jibRad = Math.toRadians(state.position("boom") - state.position("jib"));
+        double boomLen = BOOM_BASE_LENGTH + state.position("extension");
+        double tipX = boomLen * Math.cos(boomRad) + JIB_LENGTH * Math.cos(jibRad);
+        double tipY = boomLen * Math.sin(boomRad) + JIB_LENGTH * Math.sin(jibRad);
+        double currentReach = Math.hypot(tipX, tipY);
+
+        drawReachArc(g, pivotY, maxReach, "R max " + fmt(maxReach) + " m");
+        if (currentReach > 0.5 && currentReach < maxReach - 0.15) {
+            drawReachArc(g, pivotY, currentReach, "R " + fmt(currentReach) + " m");
+        }
+    }
+
+    private void drawReachArc(GraphicsContext g, double pivotY, double radius, String label) {
+        double r = radius * scale;
+        g.save();
+        g.setStroke(ANNOTATION);
+        g.setLineWidth(1);
+        g.setLineDashes(4, 6);
+        // From slightly below horizontal to past vertical (positive = CCW on screen).
+        g.strokeArc(sx(0) - r, sy(pivotY) - r, r * 2, r * 2, -12, 114,
+                javafx.scene.shape.ArcType.OPEN);
+        g.restore();
+
+        double labelRad = Math.toRadians(18);
+        g.setFill(ANNOTATION_TEXT);
+        g.setFont(ANNOTATION_FONT);
+        g.setTextAlign(TextAlignment.LEFT);
+        g.setTextBaseline(VPos.CENTER);
+        g.fillText(label,
+                sx(radius * Math.cos(labelRad)) + 5,
+                sy(pivotY + radius * Math.sin(labelRad)));
+    }
+
+    /** Small metre tick scale up the left edge; tick spacing adapts to zoom. */
+    private void drawHeightMarkers(GraphicsContext g, double height) {
+        double step = niceStep(26 / scale); // >= ~26 px between ticks
+        double topWorldY = groundY / scale;
+        double bottomWorldY = (groundY - height) / scale;
+        double first = Math.max(0, Math.ceil(bottomWorldY / step) * step);
+
+        g.setStroke(ANNOTATION);
+        g.setLineWidth(1);
+        g.setFill(ANNOTATION_TEXT);
+        g.setFont(ANNOTATION_FONT);
+        g.setTextAlign(TextAlignment.LEFT);
+        g.setTextBaseline(VPos.CENTER);
+        for (double metre = first; metre <= topWorldY; metre += step) {
+            double y = sy(metre);
+            if (y < 14 || y > height - 26) {
+                continue; // keep clear of the top edge and the scale bar corner
+            }
+            g.strokeLine(0, y, 7, y);
+            g.fillText(fmtTick(metre), 10, y);
+        }
+    }
+
+    /** Zoom-adaptive scale bar ("5 m") in the bottom-left corner. */
+    private void drawScaleBar(GraphicsContext g, double height) {
+        double len = niceBarLength(120 / scale); // longest nice length <= ~120 px
+        double px = len * scale;
+        double x = 16;
+        double y = height - 14;
+
+        g.setStroke(ANNOTATION);
+        g.setLineWidth(1);
+        g.strokeLine(x, y, x + px, y);
+        g.strokeLine(x, y - 4, x, y + 4);
+        g.strokeLine(x + px, y - 4, x + px, y + 4);
+
+        g.setFill(ANNOTATION_TEXT);
+        g.setFont(ANNOTATION_FONT);
+        g.setTextAlign(TextAlignment.CENTER);
+        g.setTextBaseline(VPos.BOTTOM);
+        g.fillText(fmtTick(len) + " m", x + px / 2, y - 4);
+    }
+
+    /** Smallest "nice" metre step that is at least {@code minWorldStep}. */
+    private static double niceStep(double minWorldStep) {
+        for (double s : new double[]{0.5, 1, 2, 5, 10, 20, 50, 100}) {
+            if (s >= minWorldStep) {
+                return s;
+            }
+        }
+        return 200;
+    }
+
+    /** Largest "nice" metre length that fits within {@code maxWorldLen}. */
+    private static double niceBarLength(double maxWorldLen) {
+        for (double s : new double[]{100, 50, 20, 10, 5, 2, 1, 0.5, 0.2}) {
+            if (s <= maxWorldLen) {
+                return s;
+            }
+        }
+        return 0.1;
+    }
+
+    private static String fmt(double metres) {
+        return String.format(Locale.ROOT, "%.1f", metres);
+    }
+
+    private static String fmtTick(double metres) {
+        return metres == Math.rint(metres)
+                ? String.format(Locale.ROOT, "%.0f", metres)
+                : String.format(Locale.ROOT, "%.1f", metres);
     }
 
     private void drawTopViewInset(GraphicsContext g, double width, CraneState state) {
