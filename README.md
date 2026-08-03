@@ -31,6 +31,16 @@ Requires JDK 21 (the Gradle wrapper handles everything else).
 bundled; drop your own `*.json` into a `profiles/` folder next to the app and it appears
 in the profile selector. Telemetry can be recorded to CSV with the REC toggle.
 
+## Driving it
+Hold **Space** (deadman — nothing moves without it), then `Q/A` slew, `W/S` boom,
+`E/D` jib, `R/F` extension, `T/G` winch. `Esc` or the big red button latches E-STOP.
+`F11` toggles fullscreen; panel edges drag to resize.
+
+**v2 additions:** switchable 2D schematic (zoom/pan, reach arcs, height scale) and a 3D
+harbour scene with four camera modes (orbit / cab / hook / follow) and a selectable load
+that can be set down and picked back up; radial + bar gauges; synthesized cockpit audio
+(hydraulic hum, motion beeper, alarm buzzer) with a MUTE toggle.
+
 ## Docs
 - [Vision](docs/VISION.md) · [Architecture](docs/ARCHITECTURE.md) ·
   [Roadmap](docs/ROADMAP.md) · [Backlog / task board](docs/BACKLOG.md)

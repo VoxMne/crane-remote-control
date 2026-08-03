@@ -71,6 +71,7 @@ public final class SchematicRenderer2D implements CraneRenderer {
 
     // Screen transform of the current frame (render() is single-threaded on the FX thread).
     private double scale;
+    private double canvasWidth; // width of the current frame, for edge-aware labels
     private double originX; // screen x of world x = 0 (pillar base)
     private double groundY; // screen y of world y = 0 (ground)
     private double fitScale;   // auto-fit scale of the current canvas size
@@ -87,6 +88,7 @@ public final class SchematicRenderer2D implements CraneRenderer {
 
     @Override
     public void render(GraphicsContext g, double width, double height, CraneProfile profile, CraneState state) {
+        canvasWidth = width;
         g.setFill(BACKGROUND);
         g.fillRect(0, 0, width, height);
         if (width < 40 || height < 40) {
@@ -307,12 +309,17 @@ public final class SchematicRenderer2D implements CraneRenderer {
         // Live annotation beside the hook: horizontal outreach from the slew
         // axis (world x = 0) and hook height above ground — the same world
         // coordinates the hook was just drawn from.
+        String readout = "out " + fmt(hookX) + " m / h " + fmt(hookY) + " m";
+        // Flip to the hook's left when the label would run past the canvas edge.
+        boolean flip = sx(hookX + blockWidth) + 4 + readout.length() * 6.2 > canvasWidth;
         g.setFill(ANNOTATION_TEXT);
         g.setFont(ANNOTATION_FONT);
-        g.setTextAlign(TextAlignment.LEFT);
+        g.setTextAlign(flip ? TextAlignment.RIGHT : TextAlignment.LEFT);
         g.setTextBaseline(VPos.CENTER);
-        g.fillText("out " + fmt(hookX) + " m / h " + fmt(hookY) + " m",
-                sx(hookX + blockWidth) + 4, sy(hookY - blockHeight / 2));
+        g.fillText(readout,
+                flip ? sx(hookX - blockWidth) - 4 : sx(hookX + blockWidth) + 4,
+                sy(hookY - blockHeight / 2));
+        g.setTextAlign(TextAlignment.LEFT);
     }
 
     private void drawJoint(GraphicsContext g, double worldX, double worldY, double radiusMetres) {

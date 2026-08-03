@@ -13,6 +13,8 @@ import com.vukotic.crane.sim.SimulatedCraneDriver;
 import com.vukotic.crane.ui.backend.ControlLoopBackend;
 import com.vukotic.crane.ui.input.KeyBindings;
 import com.vukotic.crane.ui.input.OperatorInput;
+import com.vukotic.crane.ui.render.CameraMode;
+import com.vukotic.crane.ui.render.CargoType;
 import com.vukotic.crane.ui.render.Crane3DView;
 import com.vukotic.crane.ui.render.CraneSceneView;
 import com.vukotic.crane.ui.render.Schematic2DView;
@@ -32,6 +34,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Slider;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.ToggleButton;
@@ -123,6 +126,9 @@ public final class CraneRemoteApp extends Application {
     private CraneSceneView activeView;
     private StackPane viewStack;
     private boolean use3d;
+    /** 3D camera/cargo choices: kept here so they survive profile switches. */
+    private CameraMode cameraChoice = CameraMode.ORBIT;
+    private CargoType cargoChoice = CargoType.NONE;
 
     // Assists: toggle choices survive profile switches; the sequencer never does.
     private final AutoSequencer foldSequencer = new AutoSequencer();
@@ -237,8 +243,25 @@ public final class CraneRemoteApp extends Application {
         previousAlarms = Set.of();
 
         positionBars.clear();
-        mainSplit.getItems().setAll(buildControlPanel(), buildCenterPane(), buildStatusPanel());
+        mainSplit.getItems().setAll(
+                buildControlPanel(), buildCenterPane(), scrollable(buildStatusPanel(), 300));
         mainSplit.setDividerPositions(0.235, 0.75);
+    }
+
+    /**
+     * Wraps a panel so its content scrolls instead of being clipped when the
+     * window is short or the profile has many axes. Transparent chrome keeps the
+     * panel's own rounded background visible.
+     */
+    private static ScrollPane scrollable(Region content, double minWidth) {
+        ScrollPane scroll = new ScrollPane(content);
+        scroll.setFitToWidth(true);
+        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scroll.setFocusTraversable(false);
+        scroll.setMinWidth(minWidth);
+        scroll.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
+        SplitPane.setResizableWithParent(scroll, false);
+        return scroll;
     }
 
     // ---- dev snapshot probe (visual regression aid, -Dcrane.devSnapshotDir=<dir>) ----
@@ -271,10 +294,22 @@ public final class CraneRemoteApp extends Application {
                     activeView = view3d;
                     viewStack.getChildren().set(0, activeView.node());
                 }),
-                frameAt(5.7, () -> snapshotScene(stage, dir, "03-3d-articulated.png")),
-                frameAt(5.8, () -> operatorInput.setEstopRequested(true)),
-                frameAt(6.3, () -> snapshotScene(stage, dir, "04-3d-estop.png")),
-                frameAt(6.6, javafx.application.Platform::exit));
+                frameAt(5.9, () -> snapshotScene(stage, dir, "03-3d-orbit.png")),
+                frameAt(6.0, () -> {
+                    cargoChoice = CargoType.CONTAINER;
+                    view3d.setCargo(cargoChoice);
+                }),
+                frameAt(6.8, () -> snapshotScene(stage, dir, "04-3d-cargo.png")),
+                frameAt(6.9, () -> view3d.setCameraMode(CameraMode.HOOK)),
+                frameAt(8.0, () -> snapshotScene(stage, dir, "05-3d-hook-cam.png")),
+                frameAt(8.1, () -> view3d.setCameraMode(CameraMode.CAB)),
+                frameAt(9.2, () -> snapshotScene(stage, dir, "06-3d-cab-cam.png")),
+                frameAt(9.3, () -> {
+                    view3d.setCameraMode(CameraMode.ORBIT);
+                    operatorInput.setEstopRequested(true);
+                }),
+                frameAt(10.2, () -> snapshotScene(stage, dir, "07-3d-estop.png")),
+                frameAt(10.5, javafx.application.Platform::exit));
         script.play();
     }
 
@@ -323,13 +358,10 @@ public final class CraneRemoteApp extends Application {
 
     // ---- left: controls ----
 
-    private VBox buildControlPanel() {
+    private BorderPane buildControlPanel() {
         VBox panel = new VBox(12);
-        panel.setPadding(new Insets(14));
-        panel.setPrefWidth(300);
-        panel.setMinWidth(264);
-        panel.setStyle("-fx-background-color: " + PANEL_BG + "; -fx-background-radius: 6;");
-        SplitPane.setResizableWithParent(panel, false);
+        panel.setPadding(new Insets(14, 14, 4, 14));
+        panel.setStyle("-fx-background-color: " + PANEL_BG + ";");
 
         panel.getChildren().add(sectionLabel("CONTROLS"));
         for (AxisSpec axis : profile.axes()) {
@@ -338,9 +370,6 @@ public final class CraneRemoteApp extends Application {
 
         panel.getChildren().add(sectionLabel("ASSIST"));
         panel.getChildren().add(buildAssistControls());
-
-        Region spacer = new Region();
-        VBox.setVgrow(spacer, Priority.ALWAYS);
 
         estopButton = new ToggleButton("E-STOP");
         estopButton.setMinHeight(84);
@@ -375,9 +404,22 @@ public final class CraneRemoteApp extends Application {
         fullscreenHint.setAlignment(Pos.CENTER);
         fullscreenHint.setStyle("-fx-text-fill: #566470; -fx-font-size: 10px;");
 
-        panel.getChildren().addAll(spacer, estopButton, resetButton, deadmanIndicator,
+        // Safety controls are pinned to the bottom and never scroll out of reach;
+        // only the axis/assist controls above them scroll on a short window.
+        VBox safetyBox = new VBox(8, estopButton, resetButton, deadmanIndicator,
                 fullscreenHint);
-        return panel;
+        safetyBox.setPadding(new Insets(10, 14, 14, 14));
+        safetyBox.setStyle("-fx-background-color: " + PANEL_BG
+                + "; -fx-background-radius: 0 0 6 6;");
+
+        BorderPane column = new BorderPane();
+        column.setStyle("-fx-background-color: " + PANEL_BG + "; -fx-background-radius: 6;");
+        column.setCenter(scrollable(panel, 0));
+        column.setBottom(safetyBox);
+        column.setMinWidth(264);
+        column.setPrefWidth(300);
+        SplitPane.setResizableWithParent(column, false);
+        return column;
     }
 
     private VBox buildAssistControls() {
@@ -459,6 +501,8 @@ public final class CraneRemoteApp extends Application {
     private StackPane buildCenterPane() {
         view2d = new Schematic2DView();
         view3d = new Crane3DView();
+        view3d.setCameraMode(cameraChoice);
+        view3d.setCargo(cargoChoice);
 
         viewStack = new StackPane();
         activeView = use3d ? view3d : view2d;
@@ -518,6 +562,9 @@ public final class CraneRemoteApp extends Application {
         panel.getChildren().add(buildProfileSelector());
         panel.getChildren().add(sectionLabel("DRIVER"));
         panel.getChildren().add(buildDriverSelector());
+        panel.getChildren().add(sectionLabel("3D VIEW"));
+        panel.getChildren().add(buildCameraSelector());
+        panel.getChildren().add(buildCargoSelector());
 
         panel.getChildren().add(sectionLabel("AXIS POSITIONS"));
         for (AxisSpec axis : profile.axes()) {
@@ -605,7 +652,7 @@ public final class CraneRemoteApp extends Application {
 
         panel.getChildren().add(sectionLabel("ALARM HISTORY"));
         ListView<String> historyList = alarmListView(alarmHistory, TEXT_DIM);
-        VBox.setVgrow(historyList, Priority.ALWAYS);
+        historyList.setPrefHeight(150); // fixed: the panel scrolls as a whole
         panel.getChildren().add(historyList);
         return panel;
     }
@@ -633,6 +680,56 @@ public final class CraneRemoteApp extends Application {
                 driverChoice = selected;
                 activateProfile(profile); // full reconnect through the new back-end
             }
+        });
+        return box;
+    }
+
+    /** Viewpoint picker for the 3D scene; the choice survives profile switches. */
+    private ComboBox<CameraMode> buildCameraSelector() {
+        ComboBox<CameraMode> box = new ComboBox<>(
+                FXCollections.observableArrayList(CameraMode.values()));
+        box.setMaxWidth(Double.MAX_VALUE);
+        box.setFocusTraversable(false);
+        box.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(CameraMode mode) {
+                return mode == null ? "" : "Camera: " + mode.label();
+            }
+
+            @Override
+            public CameraMode fromString(String s) {
+                throw new UnsupportedOperationException();
+            }
+        });
+        box.setValue(cameraChoice);
+        box.setOnAction(event -> {
+            cameraChoice = box.getValue();
+            view3d.setCameraMode(cameraChoice);
+        });
+        return box;
+    }
+
+    /** Load on the hook — visual only, it does not affect the simulation. */
+    private ComboBox<CargoType> buildCargoSelector() {
+        ComboBox<CargoType> box = new ComboBox<>(
+                FXCollections.observableArrayList(CargoType.values()));
+        box.setMaxWidth(Double.MAX_VALUE);
+        box.setFocusTraversable(false);
+        box.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(CargoType type) {
+                return type == null ? "" : "Load: " + type.label();
+            }
+
+            @Override
+            public CargoType fromString(String s) {
+                throw new UnsupportedOperationException();
+            }
+        });
+        box.setValue(cargoChoice);
+        box.setOnAction(event -> {
+            cargoChoice = box.getValue();
+            view3d.setCargo(cargoChoice);
         });
         return box;
     }

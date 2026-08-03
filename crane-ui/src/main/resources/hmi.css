@@ -59,6 +59,11 @@
     -fx-background-color: #2a3440;
 }
 
+/* Panel scrollers: transparent so the panel's own background shows through. */
+.scroll-pane, .scroll-pane > .viewport {
+    -fx-background-color: transparent;
+}
+
 .list-view {
     -fx-background-insets: 0;
     -fx-padding: 2;

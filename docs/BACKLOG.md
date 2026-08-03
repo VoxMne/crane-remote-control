@@ -133,9 +133,15 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — Snapshot probe, assists, fold, driver/profile wiring all intact
 
 ## M5d — V2 integration (on main, after merges)
-- [ ] TODO — CAMERA + CARGO selectors wired into the restyled UI
-- [ ] TODO — Snapshot-probe visual verification of all views; fix findings
-- [ ] TODO — Version 2.0.0, refreshed app-image + MSI, git tag v2.0.0
+- [x] DONE — Camera + Load selectors in the status panel (choices survive profile
+      switches); snapshot probe extended to 7 shots incl. cargo and camera modes
+- [x] DONE — Visual verification + fixes found only by looking at the renders:
+      · panels overflowed → status panel scrolls, safety controls pinned bottom
+      · CAB camera looked into the pillar → eye moved to the cab side window
+      · apron covered the harbour → ground now ends exactly at the quay
+      · hook readout clipped at the canvas edge → flips side near the border
+      · boat moored within crane reach instead of off-frame
+- [x] DONE — Version 2.0.0, refreshed app-image + MSI, git tag v2.0.0
 
 ## Saved for later (V2 items 8-24)
 - LMI + capacity charts · outriggers/tipping · hydraulic realism · wind · 2-axis sway

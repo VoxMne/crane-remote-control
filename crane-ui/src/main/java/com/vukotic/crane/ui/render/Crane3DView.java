@@ -92,7 +92,12 @@ public final class Crane3DView implements CraneSceneView {
     private static final double MAX_DISTANCE = 120.0;
     private static final Point3D ORBIT_CENTRE =
             new Point3D(2.5, -(BED_HEIGHT + PILLAR_HEIGHT + 1.0), 0);
-    private static final Point3D CAB_EYE = new Point3D(-4.6, -2.35, 0);
+    /**
+     * Operator eye point for {@link CameraMode#CAB}: at the cab's side window and
+     * offset in Z, so the line of sight to the load passes beside the crane pillar
+     * instead of straight through it.
+     */
+    private static final Point3D CAB_EYE = new Point3D(-5.2, -2.5, -2.4);
     private static final double TRANSITION_SECONDS = 0.6;
 
     private final Translate camCentre = new Translate(
@@ -541,22 +546,33 @@ public final class Crane3DView implements CraneSceneView {
     private static Node buildGround() {
         Group ground = new Group();
 
-        Box plane = new Box(90, 0.12, 90);
+        // The quay is the shoreline: the apron stops exactly at DOCK_EDGE_Z and the
+        // water takes over from there, so no ground ever covers the harbour.
+        double apronDepth = 220;
+        Box plane = new Box(260, 0.12, apronDepth);
         plane.setMaterial(material(GROUND));
         plane.setTranslateY(0.06); // top surface exactly at y = 0
+        plane.setTranslateZ(DOCK_EDGE_Z - apronDepth / 2);
         ground.getChildren().add(plane);
 
         PhongMaterial gridMaterial = material(GRID);
+        double gridDepth = 44;
+        double gridCentreZ = DOCK_EDGE_Z - gridDepth / 2;
         for (int metre = -30; metre <= 30; metre += 2) {
-            Box alongZ = new Box(0.05, 0.01, 60);
+            Box alongZ = new Box(0.05, 0.01, gridDepth);
             alongZ.setMaterial(gridMaterial);
             alongZ.setTranslateX(metre);
             alongZ.setTranslateY(-0.01);
-            Box alongX = new Box(60, 0.01, 0.05);
-            alongX.setMaterial(gridMaterial);
-            alongX.setTranslateZ(metre);
-            alongX.setTranslateY(-0.01);
-            ground.getChildren().addAll(alongZ, alongX);
+            alongZ.setTranslateZ(gridCentreZ);
+            ground.getChildren().add(alongZ);
+
+            if (metre <= DOCK_EDGE_Z) {
+                Box alongX = new Box(60, 0.01, 0.05);
+                alongX.setMaterial(gridMaterial);
+                alongX.setTranslateZ(metre);
+                alongX.setTranslateY(-0.01);
+                ground.getChildren().add(alongX);
+            }
         }
         return ground;
     }
@@ -579,12 +595,13 @@ public final class Crane3DView implements CraneSceneView {
             harbour.getChildren().add(bollard);
         }
 
-        Box water = new Box(140, 0.06, 60);
+        // Large enough that its far edge sits beyond the horizon from any camera.
+        Box water = new Box(600, 0.06, 400);
         PhongMaterial waterMaterial = new PhongMaterial(Color.web("#1d4f6b", 0.72));
         waterMaterial.setSpecularColor(Color.web("#7fb4cf"));
         water.setMaterial(waterMaterial);
         water.setTranslateY(WATER_LEVEL_Y);
-        water.setTranslateZ(DOCK_EDGE_Z + 30);
+        water.setTranslateZ(DOCK_EDGE_Z + 200);
 
         MeshView hull = MeshFactory.boatHull(6.5, 2.2, 1.0, material(BOAT_HULL));
         Box cabin = new Box(1.8, 0.9, 1.5);
@@ -592,9 +609,11 @@ public final class Crane3DView implements CraneSceneView {
         cabin.setTranslateX(2.6);
         cabin.setTranslateY(-0.45);
         Group boat = new Group(hull, cabin);
+        // Moored alongside the quay, within the crane's reach — the boat this
+        // project started with, waiting to be lifted onto the truck.
         boat.getTransforms().addAll(
-                new Translate(7.5, WATER_LEVEL_Y - 0.55, DOCK_EDGE_Z + 5.5),
-                new Rotate(-24, Rotate.Y_AXIS));
+                new Translate(1.5, WATER_LEVEL_Y - 0.55, DOCK_EDGE_Z + 3.2),
+                new Rotate(-96, Rotate.Y_AXIS));
         boat.getTransforms().add(boatBob);
 
         harbour.getChildren().addAll(quay, water, boat);
