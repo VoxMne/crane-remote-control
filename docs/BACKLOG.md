@@ -125,15 +125,14 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [ ] TODO — Scope guard: render package ONLY; CraneRemoteApp untouched
 
 ## M5c — HMI theme 2.0 + sound (branch `feature/hmi2-sound`) — V2 items 6,7
-- [ ] TODO — Gauges: radial slew dial + per-axis position bar meters in the status
-      panel (replacing plain text rows, keeping the numeric readouts)
-- [ ] TODO — Resizable panels (SplitPane), F11 fullscreen operator mode,
-      touch-friendly control sizing
-- [ ] TODO — SoundEngine: javax.sound.sampled, ALL sounds synthesized in code (no
-      asset files): hydraulic hum pitched by total demand, motion beeper, E-STOP/
-      watchdog alarm buzzer; MUTE toggle in the UI
-- [ ] TODO — Scope guard: keep snapshot probe, assists, fold, driver/profile wiring
-      fully intact; restyle around them
+- [x] DONE — Gauges: canvas radial slew dial (0° up, CW, red end stops) + per-axis
+      ProgressBar position meters, numeric readouts kept alongside
+- [x] DONE — SplitPane shell with draggable dividers + min widths, F11 fullscreen,
+      touch sizing in hmi.css (34 px controls, fatter slider thumbs)
+- [x] DONE — SoundEngine (javax.sound.sampled, all synthesized): hydraulic hum
+      tracking total demand, motion beeper, alarm buzzer; deadman-released feeds
+      neutral demands so the pump idles; graceful no-device fallback; MUTE toggle
+- [x] DONE — Snapshot probe, assists, fold, driver/profile wiring all intact
 
 ## M5d — V2 integration (on main, after merges)
 - [ ] TODO — CAMERA + CARGO selectors wired into the restyled UI

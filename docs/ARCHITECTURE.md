@@ -105,6 +105,21 @@ by `SerialPorts.availablePortNames()`; picking a port reconnects the session thr
 the simulator, so a wrong selection never bricks the cockpit. (The handshake blocks the
 FX thread for up to ~3 s — acceptable for v1.)
 
+## HMI 2.0 &amp; sound (M5)
+- Shell is a `SplitPane` (controls / view / status) with draggable dividers and min
+  widths; F11 toggles fullscreen. Touch-friendly sizing lives in `hmi.css`
+  (34 px minimum control height, fatter slider thumbs).
+- Gauges in the status panel: a canvas-drawn radial slew dial (0° up, positive
+  clockwise, red end stops) plus per-axis `ProgressBar` position meters; the numeric
+  readouts stay next to them.
+- `SoundEngine` (`com.vukotic.crane.ui.sound`): fully synthesized cockpit audio on a
+  daemon thread writing PCM to a `javax.sound.sampled` line — no asset files, no new
+  dependencies. Layers: hydraulic hum (pitch/volume/filter follow total demand),
+  motion beeper, E-STOP/watchdog alarm buzzer. The FX frame loop calls
+  `update(command, state)` with neutral demands whenever the deadman is released, so
+  the pump idles when the crane cannot move. Missing audio device = silently disabled.
+  MUTE toggle in the status panel.
+
 ## Dev snapshot probe
 `-Dcrane.devSnapshotDir=<dir>` (forwarded by `gradlew :crane-ui:run`) runs a scripted
 self-test on launch: drives the crane through the real input path, saves PNG snapshots
