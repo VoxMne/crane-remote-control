@@ -12,11 +12,18 @@ javafx {
 dependencies {
     implementation(project(":crane-core"))
     implementation(project(":crane-sim"))
+    implementation(project(":crane-driver-serial"))
 }
 
 application {
     // Launcher (not the Application subclass) so the packaged classpath image starts.
     mainClass.set("com.vukotic.crane.ui.Launcher")
+}
+
+// Forward the dev snapshot-probe property from the Gradle JVM to the app JVM:
+//   gradlew :crane-ui:run "-Dcrane.devSnapshotDir=<dir>"
+tasks.named<JavaExec>("run") {
+    System.getProperty("crane.devSnapshotDir")?.let { systemProperty("crane.devSnapshotDir", it) }
 }
 
 // Self-contained Windows packages via jpackage:

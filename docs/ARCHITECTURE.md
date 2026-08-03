@@ -99,6 +99,18 @@ fake in tests), so all protocol logic is tested without hardware. The safety lay
 host-side: the wire carries no E-STOP/deadman flags — zero demands are the stop, and the
 firmware's only mandatory safety duty is its own 250 ms watchdog.
 
+The HMI's DRIVER selector (status panel) lists the simulator plus every COM port found
+by `SerialPorts.availablePortNames()`; picking a port reconnects the session through
+`SerialCraneDriver`. A failed handshake logs an alarm-history event and falls back to
+the simulator, so a wrong selection never bricks the cockpit. (The handshake blocks the
+FX thread for up to ~3 s — acceptable for v1.)
+
+## Dev snapshot probe
+`-Dcrane.devSnapshotDir=<dir>` (forwarded by `gradlew :crane-ui:run`) runs a scripted
+self-test on launch: drives the crane through the real input path, saves PNG snapshots
+of the 2D view, 3D view and E-STOP state into the directory, then exits. Used for
+visual verification/regression; inert without the property.
+
 ## Threading
 ControlLoop runs on its own scheduled thread at fixed tick; UI reads the latest published
 `CraneState` via `javafx.application.Platform.runLater` or an `AnimationTimer` polling an

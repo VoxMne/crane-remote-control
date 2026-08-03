@@ -66,7 +66,7 @@ public final class Crane3DView implements CraneSceneView {
     private static final double MAX_DISTANCE = 120.0;
     private final Rotate camAzimuth = new Rotate(-35, Rotate.Y_AXIS);
     private final Rotate camElevation = new Rotate(-20, Rotate.X_AXIS);
-    private final Translate camDistance = new Translate(0, 0, -26);
+    private final Translate camDistance = new Translate(0, 0, -34);
     private double lastMouseX;
     private double lastMouseY;
 
@@ -151,8 +151,9 @@ public final class Crane3DView implements CraneSceneView {
         camera.setFarClip(600);
         camera.getTransforms().add(camDistance);
         Group cameraRig = new Group(camera);
+        // Orbit centre shifted along +X so the extended arm stays in frame.
         cameraRig.getTransforms().addAll(
-                new Translate(0, -(BED_HEIGHT + PILLAR_HEIGHT + 1.0), 0),
+                new Translate(2.5, -(BED_HEIGHT + PILLAR_HEIGHT + 1.0), 0),
                 camAzimuth, camElevation);
 
         AmbientLight ambient = new AmbientLight(Color.rgb(96, 102, 108));

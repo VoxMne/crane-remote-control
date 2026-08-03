@@ -88,7 +88,19 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — ControlLoopBackend.configureAssists (smoothing before anti-sway);
       frame loop routes commands through AutoSequencer while active
 - [x] DONE — Full build green: 121 tests / 0 failures across all four modules
-- [ ] DOING — Manual drive test (sway, assists, fold, 2D/3D, profiles) — operator
+- [x] DONE — Manual drive test (sway, assists, fold, 2D/3D, profiles)
+
+## V1.0 release
+- [x] DONE — DRIVER selector in the HMI: Simulator + detected COM ports
+      (SerialPorts helper); failed serial handshake logs an event and falls back
+      to the simulator
+- [x] DONE — Dev snapshot probe (-Dcrane.devSnapshotDir): scripted self-test
+      capturing 2D/3D/E-STOP PNGs through the real input path
+- [x] DONE — Visual verification via probe: 2D articulation, 3D articulation
+      (camera reframed: orbit centre +2.5 m, distance 34 m), E-STOP banner,
+      driver/profile selectors, assist panel — all confirmed from screenshots
+- [x] DONE — 2D/3D toggle moved top-left (was covering the top-view inset)
+- [x] DONE — Version 1.0.0, refreshed app-image + MSI, git tag v1.0.0
 
 ## Skipped for now (no equipment)
 - gamepad/joystick input · Arduino/MCU firmware in C

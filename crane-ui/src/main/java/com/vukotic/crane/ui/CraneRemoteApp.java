@@ -4,8 +4,11 @@ import com.vukotic.crane.core.model.AxisSpec;
 import com.vukotic.crane.core.model.CraneCommand;
 import com.vukotic.crane.core.model.CraneProfile;
 import com.vukotic.crane.core.assist.AutoSequencer;
+import com.vukotic.crane.core.driver.CraneDriver;
 import com.vukotic.crane.core.model.CraneState;
 import com.vukotic.crane.core.telemetry.TelemetryCsvLogger;
+import com.vukotic.crane.driver.serial.SerialCraneDriver;
+import com.vukotic.crane.driver.serial.SerialPorts;
 import com.vukotic.crane.sim.SimulatedCraneDriver;
 import com.vukotic.crane.ui.backend.ControlLoopBackend;
 import com.vukotic.crane.ui.input.KeyBindings;
@@ -121,6 +124,11 @@ public final class CraneRemoteApp extends Application {
     private ToggleButton foldButton;
     private Label foldStatus;
 
+    // Crane back-end selection ("Simulator" or "Serial: COMx"), survives profile switches.
+    private static final String DRIVER_SIMULATOR = "Simulator";
+    private static final String DRIVER_SERIAL_PREFIX = "Serial: ";
+    private String driverChoice = DRIVER_SIMULATOR;
+
     @Override
     public void start(Stage stage) {
         root = new BorderPane();
@@ -138,6 +146,11 @@ public final class CraneRemoteApp extends Application {
         stage.setMinHeight(640);
         stage.setScene(scene);
         stage.show();
+
+        String snapshotDir = System.getProperty("crane.devSnapshotDir");
+        if (snapshotDir != null) {
+            runDevSnapshotProbe(stage, Path.of(snapshotDir));
+        }
 
         frameTimer = new AnimationTimer() {
             @Override
@@ -179,9 +192,20 @@ public final class CraneRemoteApp extends Application {
 
         profile = newProfile;
         operatorInput = new OperatorInput(keyBindings, profile.axisIds());
-        backend = new ControlLoopBackend(profile, new SimulatedCraneDriver());
         foldSequencer.cancel(); // never carry an auto-sequence across cranes
+
+        backend = new ControlLoopBackend(profile, createSelectedDriver());
         backend.configureAssists(smoothingOn, antiSwayOn);
+        try {
+            backend.start(); // connects the driver; serial handshake can fail here
+        } catch (RuntimeException e) {
+            recordEvent("driver '" + driverChoice + "' failed: " + e.getMessage()
+                    + " — falling back to Simulator");
+            driverChoice = DRIVER_SIMULATOR;
+            backend = new ControlLoopBackend(profile, new SimulatedCraneDriver());
+            backend.configureAssists(smoothingOn, antiSwayOn);
+            backend.start();
+        }
 
         demandReadouts.clear();
         positionReadouts.clear();
@@ -194,8 +218,86 @@ public final class CraneRemoteApp extends Application {
         BorderPane.setMargin(root.getLeft(), new Insets(10, 0, 10, 10));
         BorderPane.setMargin(root.getCenter(), new Insets(10));
         BorderPane.setMargin(root.getRight(), new Insets(10, 10, 10, 0));
+    }
 
-        backend.start();
+    // ---- dev snapshot probe (visual regression aid, -Dcrane.devSnapshotDir=<dir>) ----
+
+    /**
+     * Scripted self-test: drives the crane through the REAL input path (deadman +
+     * axis keys), captures scene snapshots of the 2D view, the 3D view, and the
+     * E-STOP state as PNGs into the given directory, then exits. Inert unless the
+     * {@code crane.devSnapshotDir} system property is set.
+     */
+    private void runDevSnapshotProbe(Stage stage, Path dir) {
+        javafx.animation.Timeline script = new javafx.animation.Timeline(
+                frameAt(1.0, () -> snapshotScene(stage, dir, "01-2d-rest.png")),
+                frameAt(1.2, () -> {
+                    operatorInput.keyPressed("SPACE");
+                    operatorInput.keyPressed("W");  // boom +
+                    operatorInput.keyPressed("E");  // jib knuckle +
+                    operatorInput.keyPressed("R");  // extension out
+                    operatorInput.keyPressed("T");  // winch rope out
+                }),
+                frameAt(4.4, () -> {
+                    operatorInput.keyReleased("W");
+                    operatorInput.keyReleased("E");
+                    operatorInput.keyReleased("R");
+                    operatorInput.keyReleased("T");
+                }),
+                frameAt(4.9, () -> snapshotScene(stage, dir, "02-2d-articulated.png")),
+                frameAt(5.0, () -> {
+                    use3d = true;
+                    activeView = view3d;
+                    viewStack.getChildren().set(0, activeView.node());
+                }),
+                frameAt(5.7, () -> snapshotScene(stage, dir, "03-3d-articulated.png")),
+                frameAt(5.8, () -> operatorInput.setEstopRequested(true)),
+                frameAt(6.3, () -> snapshotScene(stage, dir, "04-3d-estop.png")),
+                frameAt(6.6, javafx.application.Platform::exit));
+        script.play();
+    }
+
+    private static javafx.animation.KeyFrame frameAt(double seconds, Runnable action) {
+        return new javafx.animation.KeyFrame(
+                javafx.util.Duration.seconds(seconds), event -> action.run());
+    }
+
+    /** Renders the scene off-screen and writes it as PNG (no javafx-swing needed). */
+    private static void snapshotScene(Stage stage, Path dir, String fileName) {
+        try {
+            javafx.scene.image.WritableImage image = stage.getScene().snapshot(null);
+            int width = (int) image.getWidth();
+            int height = (int) image.getHeight();
+            java.awt.image.BufferedImage out = new java.awt.image.BufferedImage(
+                    width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+            javafx.scene.image.PixelReader reader = image.getPixelReader();
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    out.setRGB(x, y, reader.getArgb(x, y));
+                }
+            }
+            java.nio.file.Files.createDirectories(dir);
+            javax.imageio.ImageIO.write(out, "png", dir.resolve(fileName).toFile());
+            System.out.println("[snapshot] wrote " + dir.resolve(fileName));
+        } catch (Exception e) {
+            System.err.println("[snapshot] failed for " + fileName + ": " + e);
+        }
+    }
+
+    /** The crane back-end for the current driver choice. */
+    private CraneDriver createSelectedDriver() {
+        if (driverChoice.startsWith(DRIVER_SERIAL_PREFIX)) {
+            return new SerialCraneDriver(driverChoice.substring(DRIVER_SERIAL_PREFIX.length()));
+        }
+        return new SimulatedCraneDriver();
+    }
+
+    /** Timestamped entry in the alarm history (driver failures, notable events). */
+    private void recordEvent(String message) {
+        alarmHistory.add(0, LocalTime.now().format(ALARM_STAMP) + "  " + message);
+        if (alarmHistory.size() > ALARM_HISTORY_LIMIT) {
+            alarmHistory.remove(ALARM_HISTORY_LIMIT, alarmHistory.size());
+        }
     }
 
     // ---- left: controls ----
@@ -361,7 +463,8 @@ public final class CraneRemoteApp extends Application {
         toggleBar.setPickOnBounds(false);
 
         StackPane center = new StackPane(viewStack, toggleBar);
-        StackPane.setAlignment(toggleBar, Pos.TOP_RIGHT);
+        // Top-left: the top-right corner belongs to the 2D top-view inset.
+        StackPane.setAlignment(toggleBar, Pos.TOP_LEFT);
         return center;
     }
 
@@ -382,7 +485,8 @@ public final class CraneRemoteApp extends Application {
 
         panel.getChildren().add(sectionLabel("PROFILE"));
         panel.getChildren().add(buildProfileSelector());
-        panel.getChildren().add(infoRow("DRIVER", backend.driverName()));
+        panel.getChildren().add(sectionLabel("DRIVER"));
+        panel.getChildren().add(buildDriverSelector());
 
         panel.getChildren().add(sectionLabel("AXIS POSITIONS"));
         for (AxisSpec axis : profile.axes()) {
@@ -435,6 +539,33 @@ public final class CraneRemoteApp extends Application {
         VBox.setVgrow(historyList, Priority.ALWAYS);
         panel.getChildren().add(historyList);
         return panel;
+    }
+
+    /**
+     * Back-end picker: the simulator plus every COM port present on this machine.
+     * Selecting a port reconnects the whole session through the serial driver
+     * (docs/PROTOCOL.md); a failed handshake logs an event and falls back to the
+     * simulator, so a wrong choice can never brick the cockpit.
+     */
+    private ComboBox<String> buildDriverSelector() {
+        List<String> options = new java.util.ArrayList<>();
+        options.add(DRIVER_SIMULATOR);
+        SerialPorts.availablePortNames()
+                .forEach(port -> options.add(DRIVER_SERIAL_PREFIX + port));
+
+        ComboBox<String> box = new ComboBox<>(FXCollections.observableArrayList(options));
+        box.setMaxWidth(Double.MAX_VALUE);
+        box.setFocusTraversable(false);
+        box.setValue(options.contains(driverChoice) ? driverChoice : DRIVER_SIMULATOR);
+        // Wired after setValue so the initial selection cannot re-trigger a rebuild.
+        box.setOnAction(event -> {
+            String selected = box.getValue();
+            if (selected != null && !selected.equals(driverChoice)) {
+                driverChoice = selected;
+                activateProfile(profile); // full reconnect through the new back-end
+            }
+        });
+        return box;
     }
 
     private ComboBox<CraneProfile> buildProfileSelector() {
