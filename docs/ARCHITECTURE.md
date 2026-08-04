@@ -69,6 +69,15 @@ optional and are covered by tests:
 7. **Non-finite demands are neutral.** NaN and infinity survive clamping, so the
    safety layer maps them to zero rather than letting them poison the ramp
    limiter and everything downstream.
+8. **Replay cannot drive anything (V3.4).** While a recording is on screen the
+   command thread sends neutral, exactly as it does for a stalled UI: what the
+   operator sees is the past, so their inputs must not reach the present machine.
+   The status pill says `REPLAY — RECORDED` rather than reporting the recording's
+   own flags as if they were live.
+9. **Nothing safety-relevant is persisted (V3.4).** `UiSettings` restores the
+   window, crane, back-end, view and weather. Driver mode, the E-STOP latch and
+   the deadman always start from their safe state — a machine that came back up in
+   the mode you left it in is a surprise, and surprises are how people get hurt.
 
 ## Assist pipeline (M4)
 `ControlLoop` applies an optional chain of `DemandFilter`s to the raw demands each tick,
@@ -196,6 +205,26 @@ Frozen public API for the UI: `setCameraMode`/`cameraMode`, `setCargo`/`cargo`.
   Switching profiles tears down the session (backend, telemetry) and rebuilds the cockpit.
 - `TelemetryCsvLogger` (core): a control-loop state listener writing one CSV row per tick
   (Locale.ROOT numbers); UI REC toggle writes `telemetry/telemetry-<profile>-<stamp>.csv`.
+- `TelemetryCsvReader` (core, V3.4): the inverse. The header names the axes, so a
+  recording is self-describing and needs neither the profile it came from nor a running
+  crane; malformed rows are skipped so a run truncated by a crash still plays.
+  `Recording.frameAt(elapsedMillis)` is what the frame loop asks for.
+- `CraneProfileWriter` (core, V3.4): `CraneProfile` → the same JSON the loader reads, so
+  a machine built in the editor is a file you can email, diff or hand to a manufacturer.
+  The id is sanitised into the file name; it can never escape the folder.
+- `ProfileEditorDialog` (ui, V3.4): a name and a table of axes. Validation is by
+  construction — the values go to `AxisSpec`/`CraneProfile`, whose constructors already
+  reject inverted limits, duplicate ids and non-positive speeds, and the dialog reports
+  their complaint rather than duplicating the rules. Saving reloads the catalog and
+  activates the crane, so an edit is driveable without a restart.
+- Replay (ui, V3.4): `displayState()` returns a recorded frame instead of the live one
+  while a recording is loaded; see safety invariant 8. A CSV given on the command line
+  (`crane-remote-control run.csv`) opens straight into it.
+- `AppPaths` (ui, V3.4): profiles and recordings used to be relative paths, which resolve
+  against the process working directory — the repo under Gradle, but something arbitrary
+  and often unwritable for a copy started from the Start menu. Now: `./profiles` and
+  `./telemetry` if they already exist (repo checkout, portable folder), otherwise
+  `%LOCALAPPDATA%\CraneRemoteControl\` (or `~/.craneremotecontrol` off Windows).
 
 ## Packaging
 `gradlew :crane-ui:jpackageImage` (badass-runtime plugin): jlink'ed JRE + app classpath

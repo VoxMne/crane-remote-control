@@ -8,6 +8,7 @@ import com.vukotic.crane.core.assist.AutoSequencer;
 import com.vukotic.crane.core.driver.CraneDriver;
 import com.vukotic.crane.core.model.CraneState;
 import com.vukotic.crane.core.telemetry.TelemetryCsvLogger;
+import com.vukotic.crane.core.telemetry.TelemetryCsvReader;
 import com.vukotic.crane.driver.serial.SerialCraneDriver;
 import com.vukotic.crane.driver.serial.SerialPorts;
 import com.vukotic.crane.sim.SimulatedCraneDriver;
@@ -61,6 +62,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -99,7 +101,8 @@ public final class CraneRemoteApp extends Application {
     private static final int ALARM_HISTORY_LIMIT = 100;
 
     private final KeyBindings keyBindings = KeyBindings.defaults();
-    private final List<CraneProfile> catalog = ProfileCatalog.available();
+    /** Mutable: the profile editor can add to it without a restart. */
+    private final List<CraneProfile> catalog = new ArrayList<>(ProfileCatalog.available());
 
     // ---- per-profile session, rebuilt by activateProfile() ----
     // Volatile: swapped on the FX thread, read by the command thread.
@@ -199,6 +202,7 @@ public final class CraneRemoteApp extends Application {
     private Node welcomeOverlay;
     private SplitPane mainSplit;
     private final SoundEngine soundEngine = new SoundEngine();
+    private final UiSettings settings = new UiSettings();
     private ToggleButton muteButton;
     private Canvas slewDial;
     private final Map<String, ProgressBar> positionBars = new HashMap<>();
@@ -207,6 +211,7 @@ public final class CraneRemoteApp extends Application {
     public void start(Stage stage) {
         this.stage = stage;
         version = getClass().getPackage().getImplementationVersion();
+        CraneProfile startProfile = restoreSettings();
 
         root = new BorderPane();
         root.setStyle("-fx-background-color: " + BG + ";");
@@ -221,15 +226,16 @@ public final class CraneRemoteApp extends Application {
         // thing a visitor sees is what the product is, not a wall of controls.
         appStack = new StackPane(root, buildWelcomeOverlay());
 
-        Scene scene = new Scene(appStack, 1280, 820);
+        Scene scene = new Scene(appStack, settings.windowWidth(), settings.windowHeight());
         scene.getStylesheets().add(getClass().getResource("/hmi.css").toExternalForm());
         installKeyHandlers(scene);
 
-        activateProfile(catalog.get(0));
+        activateProfile(startProfile);
 
         stage.setTitle("Crane Remote Control" + (version == null ? " (dev)" : " " + version));
         stage.setMinWidth(1060);
         stage.setMinHeight(680);
+        stage.setMaximized(settings.maximised());
         // Losing focus means we will never see the matching key releases, so treat
         // it as the operator letting go of everything.
         stage.focusedProperty().addListener((obs, was, focused) -> {
@@ -256,6 +262,7 @@ public final class CraneRemoteApp extends Application {
         }
 
         startCommandThread();
+        openRecordingFromCommandLine();
 
         // The frame timer only DRAWS. It never produces commands, so a slow or
         // stalled renderer can no longer starve the control path.
@@ -264,7 +271,7 @@ public final class CraneRemoteApp extends Application {
             public void handle(long frameNanos) {
                 uiHeartbeatMillis = MonotonicClock.millis();   // "the UI is alive"
                 CraneCommand command = lastCommand;
-                CraneState state = backend.latestState();
+                CraneState state = displayState();
                 if (command == null) {
                     return;
                 }
@@ -276,6 +283,76 @@ public final class CraneRemoteApp extends Application {
             }
         };
         frameTimer.start();
+    }
+
+    /**
+     * {@code crane-remote-control run.csv} opens straight into that recording.
+     * A telemetry file is then a self-contained thing you can send someone: they
+     * see the machine move without owning one.
+     */
+    private void openRecordingFromCommandLine() {
+        getParameters().getRaw().stream()
+                .filter(argument -> argument.toLowerCase(java.util.Locale.ROOT).endsWith(".csv"))
+                .findFirst()
+                .ifPresent(argument -> beginReplay(Path.of(argument).toAbsolutePath()));
+    }
+
+    /**
+     * Puts back the choices the operator left behind — crane, back-end, view,
+     * camera, load, assists, weather, sound — before anything is built, so every
+     * panel is constructed already showing the restored value.
+     *
+     * <p>Nothing safety-relevant is restored. Driver mode, the E-STOP latch and
+     * the deadman always start from their safe state.
+     *
+     * @return the crane to activate
+     */
+    private CraneProfile restoreSettings() {
+        driverChoice = settings.driverChoice(DRIVER_SIMULATOR);
+        use3d = settings.use3d();
+        cameraChoice = enumOrDefault(CameraMode.values(),
+                settings.cameraMode(cameraChoice.name()), cameraChoice);
+        cargoChoice = enumOrDefault(CargoType.values(),
+                settings.cargoType(cargoChoice.name()), cargoChoice);
+        smoothingOn = settings.smoothing();
+        antiSwayOn = settings.antiSway();
+        windSpeed = Math.clamp(settings.windSpeed(), 0, 20);
+        windFromDeg = ((settings.windFromDeg() % 360) + 360) % 360;
+        soundEngine.setMuted(settings.muted());
+
+        String savedProfile = settings.profileId(catalog.get(0).id());
+        return catalog.stream()
+                .filter(candidate -> candidate.id().equals(savedProfile))
+                .findFirst()
+                .orElse(catalog.get(0));   // the saved crane may have been deleted
+    }
+
+    /** Enum lookup that tolerates a stored name from an older version. */
+    private static <E extends Enum<E>> E enumOrDefault(E[] values, String name, E fallback) {
+        for (E value : values) {
+            if (value.name().equals(name)) {
+                return value;
+            }
+        }
+        return fallback;
+    }
+
+    private void saveSettings() {
+        if (stage == null) {
+            return;
+        }
+        // While maximised the stage reports the screen size; storing that would
+        // make "restore down" on the next run fill the screen anyway. Keep the
+        // last windowed size instead.
+        boolean maximised = stage.isMaximized();
+        double width = maximised ? settings.windowWidth() : stage.getWidth();
+        double height = maximised ? settings.windowHeight() : stage.getHeight();
+        settings.save(new UiSettings.Snapshot(
+                width, height, maximised,
+                profile.id(), driverChoice,
+                use3d, cameraChoice.name(), cargoChoice.name(),
+                smoothingOn, antiSwayOn,
+                windSpeed, windFromDeg, soundEngine.isMuted()));
     }
 
     /**
@@ -304,7 +381,7 @@ public final class CraneRemoteApp extends Application {
                         // Without this the cached key state would keep producing
                         // freshly-timestamped commands after a UI freeze or a lost
                         // key-release, and the watchdog would never notice.
-                        if (!isUiAlive()) {
+                        if (!isUiAlive() || replaying) {
                             command = neutralWithFlags(activeProfile, command, false);
                         } else if (driverMode) {
                             // Crane lockout: the driver is in the cab, not on the
@@ -345,6 +422,7 @@ public final class CraneRemoteApp extends Application {
 
     @Override
     public void stop() {
+        saveSettings();
         if (frameTimer != null) {
             frameTimer.stop();
         }
@@ -379,6 +457,10 @@ public final class CraneRemoteApp extends Application {
             operatorInput.setEstopRequested(true);
         }
         foldSequencer.cancel(); // never carry an auto-sequence across cranes
+        // The status panel (and with it the replay button) is rebuilt below, so
+        // any running replay ends here rather than leaving the flag orphaned.
+        recording = null;
+        replaying = false;
 
         backend = new ControlLoopBackend(profile, createSelectedDriver());
         backend.configureAssists(smoothingOn, antiSwayOn);
@@ -561,6 +643,47 @@ public final class CraneRemoteApp extends Application {
     private Label demoCaption;
     private ToggleButton demoButton;
 
+    /** The scripted presentations available from the header. */
+    private enum DemoScenario {
+        LOADING("Loading a truck"),
+        PRECISION("Precision placement"),
+        SAFETY("Safety and emergency stop");
+
+        private final String label;
+
+        DemoScenario(String label) {
+            this.label = label;
+        }
+
+        String label() {
+            return label;
+        }
+    }
+
+    private DemoScenario demoScenario = DemoScenario.LOADING;
+
+    private ComboBox<DemoScenario> buildScenarioSelector() {
+        ComboBox<DemoScenario> box = new ComboBox<>(
+                FXCollections.observableArrayList(DemoScenario.values()));
+        box.setFocusTraversable(false);
+        box.setPrefWidth(210);
+        box.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(DemoScenario scenario) {
+                return scenario == null ? "" : scenario.label();
+            }
+
+            @Override
+            public DemoScenario fromString(String s) {
+                throw new UnsupportedOperationException();
+            }
+        });
+        box.setValue(demoScenario);
+        box.setOnAction(event -> demoScenario = box.getValue());
+        box.setTooltip(new Tooltip("Which narrated sequence RUN DEMO plays."));
+        return box;
+    }
+
     private Node buildDemoButton() {
         demoButton = new ToggleButton(">  RUN DEMO");
         demoButton.getStyleClass().add("primary-button");
@@ -600,6 +723,9 @@ public final class CraneRemoteApp extends Application {
             demoButton.setSelected(false);
             return;
         }
+        if (replaying) {
+            stopReplay();   // the demo needs the live simulator on screen
+        }
         dismissWelcome();
         demoRunning = true;
         demoButton.setSelected(true);
@@ -613,7 +739,18 @@ public final class CraneRemoteApp extends Application {
             showView3d();
         }
 
-        demoTimeline = new javafx.animation.Timeline(
+        demoTimeline = new javafx.animation.Timeline();
+        demoTimeline.getKeyFrames().addAll(switch (demoScenario) {
+            case PRECISION -> precisionScenario();
+            case SAFETY -> safetyScenario();
+            default -> loadingScenario();
+        });
+        demoTimeline.play();
+    }
+
+    /** The original pitch: hook a load, set it on the deck, drive away. */
+    private List<javafx.animation.KeyFrame> loadingScenario() {
+        return List.of(
                 frameAt(0.2, () -> showCaption(
                         "A container hangs on the hook. Nothing moves yet — the crane "
                                 + "only responds while the operator holds the deadman.")),
@@ -651,7 +788,78 @@ public final class CraneRemoteApp extends Application {
                         "The same software drives a simulator or real hardware — the crane "
                                 + "is reached only through a driver interface.")),
                 frameAt(39.0, this::stopDemo));
-        demoTimeline.play();
+    }
+
+    /** Shows the assists earning their keep: wind, sway, anti-sway, hook camera. */
+    private List<javafx.animation.KeyFrame> precisionScenario() {
+        return List.of(
+                frameAt(0.2, () -> {
+                    showCaption("Placing a load precisely, in wind. First without any "
+                            + "assistance.");
+                    view3d.setCameraMode(CameraMode.HOOK);
+                    cameraChoice = CameraMode.HOOK;
+                    windSpeed = 12;
+                    windFromDeg = 90;
+                    applyWind();
+                }),
+                frameAt(3.0, () -> {
+                    operatorInput.keyPressed("SPACE");
+                    operatorInput.keyPressed("T");     // pay out rope: a long pendulum
+                }),
+                frameAt(8.0, () -> {
+                    showCaption("A 12 m/s crosswind pushes the load off vertical and the "
+                            + "slew excites it. Watch the swing.");
+                    operatorInput.keyReleased("T");
+                    operatorInput.keyPressed("Q");
+                }),
+                frameAt(13.0, () -> operatorInput.keyReleased("Q")),
+                frameAt(18.0, () -> {
+                    showCaption("Now with ANTI-SWAY: the crane corrects the slew against the "
+                            + "measured swing and the load settles in roughly half the time.");
+                    antiSwayOn = true;
+                    backend.configureAssists(smoothingOn, true);
+                    operatorInput.keyPressed("Q");
+                }),
+                frameAt(23.0, () -> operatorInput.keyReleased("Q")),
+                frameAt(30.0, () -> showCaption(
+                        "Smoothing and anti-sway are assists: they shape the operator's "
+                                + "demand, but the safety layer still has the final word.")),
+                frameAt(36.0, this::stopDemo));
+    }
+
+    /** The part a manufacturer actually buys: what happens when things go wrong. */
+    private List<javafx.animation.KeyFrame> safetyScenario() {
+        return List.of(
+                frameAt(0.2, () -> showCaption(
+                        "Every safety behaviour in this sequence is enforced by the control "
+                                + "core, not by the screen.")),
+                frameAt(4.0, () -> {
+                    showCaption("Hold-to-run: the crane moves only while the deadman is held.");
+                    operatorInput.keyPressed("SPACE");
+                    operatorInput.keyPressed("W");
+                }),
+                frameAt(9.0, () -> {
+                    showCaption("Deadman released — motion ramps down under control rather "
+                            + "than stopping dead, which would shock the hydraulics.");
+                    operatorInput.keyReleased("SPACE");
+                }),
+                frameAt(14.0, () -> {
+                    showCaption("Interference protection: the arm will not be driven into "
+                            + "the truck, the ground, or a load standing nearby.");
+                    operatorInput.keyPressed("SPACE");
+                    operatorInput.keyPressed("E");   // fold the jib toward the deck
+                }),
+                frameAt(20.0, () -> {
+                    showCaption("Emergency stop latches instantly and stays latched. It "
+                            + "cannot be cleared by software — only by a person, with every "
+                            + "control at neutral.");
+                    operatorInput.releaseAllKeys();
+                    estopButton.setSelected(true);
+                }),
+                frameAt(27.0, () -> showCaption(
+                        "A watchdog does the same job if commands stop arriving at all: a "
+                                + "frozen program or a cut cable stops the machine.")),
+                frameAt(33.0, this::stopDemo));
     }
 
     /** Ends the demo and hands a clean, safe machine back to the operator. */
@@ -707,7 +915,8 @@ public final class CraneRemoteApp extends Application {
         HBox left = new HBox(10, title, versionLabel);
         left.setAlignment(Pos.CENTER_LEFT);
 
-        HBox bar = new HBox(16, left, headerSubtitle, spacer, buildDemoButton(), statusPill);
+        HBox bar = new HBox(16, left, headerSubtitle, spacer,
+                buildScenarioSelector(), buildDemoButton(), statusPill);
         bar.setAlignment(Pos.CENTER_LEFT);
         bar.getStyleClass().add("app-header");
         return bar;
@@ -717,7 +926,12 @@ public final class CraneRemoteApp extends Application {
     private void updateStatusPill(CraneState state) {
         String text;
         String style;
-        if (state.estopLatched()) {
+        // Checked first: during replay every flag below belongs to the recording,
+        // not to the machine in front of you. Saying "RUNNING" would be a lie.
+        if (replaying) {
+            text = "REPLAY — RECORDED";
+            style = "pill-warn";
+        } else if (state.estopLatched()) {
             text = "E-STOP LATCHED";
             style = "pill-alarm";
         } else if (demoRunning) {
@@ -1104,6 +1318,7 @@ public final class CraneRemoteApp extends Application {
 
         panel.getChildren().add(sectionLabel("PROFILE"));
         panel.getChildren().add(buildProfileSelector());
+        panel.getChildren().add(buildProfileEditorButtons());
         panel.getChildren().add(sectionLabel("DRIVER"));
         panel.getChildren().add(buildDriverSelector());
         panel.getChildren().add(sectionLabel("3D VIEW"));
@@ -1171,7 +1386,7 @@ public final class CraneRemoteApp extends Application {
         recordInfo = new Label("not recording");
         recordInfo.setWrapText(true);
         recordInfo.setStyle("-fx-text-fill: " + TEXT_DIM + "; -fx-font-size: 11px;");
-        panel.getChildren().addAll(recordButton, recordInfo);
+        panel.getChildren().addAll(recordButton, recordInfo, buildReplayButton());
 
         panel.getChildren().add(sectionLabel("SOUND"));
         muteButton = new ToggleButton("MUTE");
@@ -1284,6 +1499,54 @@ public final class CraneRemoteApp extends Application {
         view3d.setCargo(cargoChoice);
     }
 
+    /**
+     * New/Edit buttons for crane profiles. Building a customer's own machine in
+     * front of them, then driving it, is the demo that closes the sale.
+     */
+    private HBox buildProfileEditorButtons() {
+        Button newProfile = new Button("New crane");
+        newProfile.setFocusTraversable(false);
+        newProfile.setMaxWidth(Double.MAX_VALUE);
+        newProfile.setTooltip(new Tooltip(
+                "Describe a crane by its axes and limits; it is saved as a JSON file "
+                        + "and can be driven immediately."));
+        newProfile.setOnAction(event -> openProfileEditor(null));
+
+        Button editProfile = new Button("Edit");
+        editProfile.setFocusTraversable(false);
+        editProfile.setMaxWidth(Double.MAX_VALUE);
+        editProfile.setTooltip(new Tooltip("Edit a copy of the crane now selected."));
+        editProfile.setOnAction(event -> openProfileEditor(profile));
+
+        HBox.setHgrow(newProfile, Priority.ALWAYS);
+        HBox.setHgrow(editProfile, Priority.ALWAYS);
+        return new HBox(6, newProfile, editProfile);
+    }
+
+    private void openProfileEditor(CraneProfile template) {
+        String stylesheet = getClass().getResource("/hmi.css").toExternalForm();
+        new ProfileEditorDialog(template, AppPaths.profiles(), stylesheet)
+                .showAndSave()
+                .ifPresent(file -> {
+                    recordEvent("Saved crane profile " + file.getFileName());
+                    String fileName = file.getFileName().toString();
+                    reloadCatalogAndSelect(fileName.substring(0, fileName.lastIndexOf('.')));
+                });
+    }
+
+    /**
+     * Re-reads the profiles folder and switches to the named crane, so an edit is
+     * driveable immediately without restarting.
+     */
+    private void reloadCatalogAndSelect(String profileId) {
+        catalog.clear();
+        catalog.addAll(ProfileCatalog.available());
+        catalog.stream()
+                .filter(candidate -> candidate.id().equals(profileId))
+                .findFirst()
+                .ifPresentOrElse(this::activateProfile, () -> activateProfile(profile));
+    }
+
     private ComboBox<CraneProfile> buildProfileSelector() {
         ComboBox<CraneProfile> box = new ComboBox<>(FXCollections.observableArrayList(catalog));
         box.setMaxWidth(Double.MAX_VALUE);
@@ -1327,10 +1590,119 @@ public final class CraneRemoteApp extends Application {
         return list;
     }
 
+    // ---- replay ----
+
+    private TelemetryCsvReader.Recording recording;
+    private long replayStartedMillis;
+    private ToggleButton replayButton;
+    /**
+     * Volatile, and read by the command thread: while the screen is showing a
+     * recording it must be impossible to drive the real back-end, or an operator
+     * would be moving a machine they cannot see.
+     */
+    private volatile boolean replaying;
+
+    /**
+     * Plays a recorded run back through the views. Nothing is simulated: the
+     * frames come straight from the CSV, so a laptop with no crane and no
+     * simulator can show exactly what a machine did on site.
+     */
+    private ToggleButton buildReplayButton() {
+        replayButton = new ToggleButton("REPLAY A RECORDING");
+        replayButton.setFocusTraversable(false);
+        replayButton.setMaxWidth(Double.MAX_VALUE);
+        replayButton.setTooltip(new Tooltip(
+                "Load a telemetry CSV and play it back. The crane is not simulated "
+                        + "during replay - the frames are the recording."));
+        replayButton.selectedProperty().addListener((obs, was, selected) -> {
+            if (!selected) {
+                stopReplay();
+            } else if (!replaying) {
+                // Guarded: beginReplay() selects the button itself, and that must
+                // not bounce back into here and re-open the file chooser.
+                startReplay();
+            }
+        });
+        return replayButton;
+    }
+
+    private void startReplay() {
+        if (demoRunning) {
+            demoButton.setSelected(false);   // one thing at a time on the screen
+        }
+        javafx.stage.FileChooser chooser = new javafx.stage.FileChooser();
+        chooser.setTitle("Open a telemetry recording");
+        chooser.getExtensionFilters().add(
+                new javafx.stage.FileChooser.ExtensionFilter("Telemetry CSV", "*.csv"));
+        Path defaultDir = AppPaths.telemetry();
+        if (java.nio.file.Files.isDirectory(defaultDir)) {
+            chooser.setInitialDirectory(defaultDir.toFile());
+        }
+        java.io.File file = chooser.showOpenDialog(stage);
+        if (file == null) {
+            replayButton.setSelected(false);
+            return;
+        }
+        beginReplay(file.toPath());
+    }
+
+    /**
+     * Starts playing {@code file}. Also the entry point for a recording passed on
+     * the command line, so a CSV mailed to a customer can be opened straight into
+     * the cockpit without them owning a crane.
+     */
+    private void beginReplay(Path file) {
+        try {
+            recording = new TelemetryCsvReader().read(file);
+            if (recording.isEmpty()) {
+                recordEvent("Recording " + file.getFileName() + " has no usable frames");
+                recording = null;
+                replayButton.setSelected(false);
+                return;
+            }
+            // Stop commanding anything while a recording drives the screen.
+            operatorInput.releaseAllKeys();
+            drivingKeys.clear();
+            replaying = true;
+            replayStartedMillis = MonotonicClock.millis();
+            replayButton.setSelected(true);
+            replayButton.setText("STOP REPLAY");
+            dismissWelcome();
+            showCaption("Replaying " + file.getFileName() + " ("
+                    + (recording.durationMillis() / 1000) + " s of recorded motion)");
+        } catch (IOException e) {
+            recordEvent("Could not read recording: " + e.getMessage());
+            recording = null;
+            replayButton.setSelected(false);
+        }
+    }
+
+    private void stopReplay() {
+        recording = null;
+        replaying = false;
+        replayButton.setText("REPLAY A RECORDING");
+        replayButton.setSelected(false);
+        demoCaption.setVisible(false);
+    }
+
+    /** The state to draw this frame: a recorded one while replaying, else live. */
+    private CraneState displayState() {
+        TelemetryCsvReader.Recording active = recording;
+        if (active == null) {
+            return backend.latestState();
+        }
+        long elapsed = MonotonicClock.millis() - replayStartedMillis;
+        if (elapsed > active.durationMillis() + 1_000) {
+            stopReplay();
+            return backend.latestState();
+        }
+        return active.frameAt(elapsed);
+    }
+
     // ---- telemetry ----
 
     private void startTelemetry() {
-        Path file = Path.of("telemetry", "telemetry-%s-%s.csv"
+        Path file = AppPaths.telemetry().resolve("telemetry-%s-%s.csv"
                 .formatted(profile.id(), LocalDateTime.now().format(FILE_STAMP)));
         try {
             telemetryLogger = new TelemetryCsvLogger(file, profile);

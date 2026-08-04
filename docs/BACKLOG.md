@@ -223,6 +223,31 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       captions over the scene — built for presenting to manufacturers
 - [x] DONE — Tooltips explaining the safety-critical controls for non-crane audiences
 
+## V3.3.0 — safety fixes from an external audit
+- [x] DONE — The guided demo refuses to run on anything but the simulator
+- [x] DONE — The E-STOP latch survives a profile/driver switch and is never cleared in code
+- [x] DONE — UI heartbeat (400 ms): a stalled JavaFX thread makes commands go out neutral;
+      held keys are released on focus loss and on minimise
+- [x] DONE — `driverMode` volatile; `MonotonicClock` for all elapsed safety time
+- [x] DONE — Serial fails closed: no demands without telemetry fresher than 250 ms
+
+## V3.4.0 — the pitch pass (four features aimed at a sales demo)
+- [x] DONE — **Demo scenarios**: RUN DEMO plays one of three narrated sequences —
+      Loading a truck / Precision placement / Safety and emergency stop
+- [x] DONE — **Telemetry replay**: `TelemetryCsvReader` in crane-core reads back what the
+      logger wrote (malformed rows skipped, so a crashed run still plays); REPLAY A
+      RECORDING in the telemetry panel, and `crane-remote-control run.csv` opens straight
+      into a recording. Commands are forced neutral while a recording is on screen and
+      the status pill reads REPLAY — RECORDED
+- [x] DONE — **Persistence** (`UiSettings`, java.util.prefs): window size/maximised,
+      crane, back-end, 2D/3D, camera, load, assists, wind and mute. Deliberately not
+      persisted: driver mode, the E-STOP latch, the deadman
+- [x] DONE — **Profile editor**: New crane / Edit build a `CraneProfile` from a table of
+      axes, validated by the model's own constructors, written as JSON via
+      `CraneProfileWriter` and driveable immediately without a restart
+- [x] DONE — `AppPaths`: profiles and recordings go to a per-user folder when the app is
+      installed, instead of a working directory the user may not be able to write to
+
 ## Known limits (honest scope)
 - Collision covers the **arm** against the cab, deck, ground and set-down loads. It is
   not a rigid-body physics engine: no rope dynamics, no tipping, no contact friction,
@@ -233,9 +258,10 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 
 ## Saved for later (V2 items 8-24)
 - LMI + capacity charts · outriggers/tipping · hydraulic realism · wind · 2-axis sway
-- point-and-lift · geofencing · training mode · replay
+- point-and-lift · geofencing · training mode
 - gamepad · Arduino/ESP32 firmware · tablet HMI
-- profile editor · CI · logging/crash bundles · localization · code signing/licensing
+- CI · logging/crash bundles · localization · code signing/licensing
+- replay scrubbing (pause / seek / speed) — V3.4.0 plays a recording straight through
 
 ## Skipped for now (no equipment)
 - gamepad/joystick input · Arduino/MCU firmware in C

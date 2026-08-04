@@ -44,7 +44,7 @@ public final class ProfileCatalog {
             }
         }
 
-        Path userDir = Path.of("profiles");
+        Path userDir = AppPaths.profiles();
         if (Files.isDirectory(userDir)) {
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(userDir, "*.json")) {
                 for (Path file : stream) {
