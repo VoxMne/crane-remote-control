@@ -30,6 +30,7 @@ import javafx.scene.transform.Rotate;
 import javafx.scene.transform.Scale;
 import javafx.scene.transform.Translate;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -92,6 +93,10 @@ public final class Crane3DView implements CraneSceneView {
     private static final double APRON_LIMIT_X = 26.0;
     private static final double APRON_LIMIT_Z = 26.0;
     private static final double GRAVITY = 9.81;
+    /** Half the truck body's width, used as its collision radius while driving. */
+    private static final double TRUCK_HALF_WIDTH = 1.35;
+    /** Clearance the arm keeps from scenery while the truck is moving. */
+    private static final double ARM_CLEARANCE = 0.3;
 
     // ---- palette ----
     private static final Color GROUND = Color.web("#39414c");   // lit concrete apron
@@ -178,6 +183,17 @@ public final class Crane3DView implements CraneSceneView {
     private final Translate cargoTranslate = new Translate();
     private final Rotate cargoRotate = new Rotate(0, Rotate.Y_AXIS);
     private final Translate boatBob = new Translate();
+
+    /**
+     * Solid scenery in world coordinates (core convention: Y up). The crane must
+     * not swing through it and the truck must not drive through it.
+     */
+    private final List<Aabb> worldObstacles = new ArrayList<>();
+
+    /** Arm joints in vehicle coordinates, refreshed each frame for driving checks. */
+    private Point3D armPivotVehicle;
+    private Point3D armBoomTipVehicle;
+    private Point3D armJibTipVehicle;
 
     private CargoType cargoType = CargoType.NONE;
     private boolean cargoAttached = true;
@@ -402,15 +418,47 @@ public final class Crane3DView implements CraneSceneView {
      * is on the hook, since the hook carries it out of harm's way.
      */
     public List<Aabb> loadObstacles() {
-        if (cargoType == CargoType.NONE || cargoAttached) {
-            return List.of();
+        List<Aabb> obstacles = new ArrayList<>();
+
+        // Everything solid in the world — stacked containers and the like —
+        // brought into the crane's own frame, since the truck may have driven.
+        for (Aabb world : worldObstacles) {
+            obstacles.add(worldBoxToVehicle(world));
         }
-        Point3D local = worldToVehicle(restingWorldPosition());
-        // Vehicle frame is Y-down with the origin at ground level; the core frame
-        // is Y-up. Only the vertical axis needs flipping.
-        Vec3 centre = new Vec3(local.getX(), -local.getY(), local.getZ());
-        return List.of(Aabb.centred(centre,
-                cargoType.length(), cargoType.height(), cargoType.width()));
+
+        if (cargoType != CargoType.NONE && !cargoAttached) {
+            Point3D local = worldToVehicle(restingWorldPosition());
+            // Vehicle frame is Y-down with the origin at ground level; the core
+            // frame is Y-up. Only the vertical axis needs flipping.
+            Vec3 centre = new Vec3(local.getX(), -local.getY(), local.getZ());
+            obstacles.add(Aabb.centred(centre,
+                    cargoType.length(), cargoType.height(), cargoType.width()));
+        }
+        return obstacles;
+    }
+
+    /**
+     * Re-expresses a world-frame box in the crane's frame. The truck's heading
+     * makes the box no longer axis-aligned, so this returns the axis-aligned box
+     * that encloses the rotated one — conservative, which is the right way to be
+     * wrong for a collision guard.
+     */
+    private Aabb worldBoxToVehicle(Aabb world) {
+        double minX = Double.MAX_VALUE;
+        double minZ = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double maxZ = -Double.MAX_VALUE;
+        for (double x : new double[]{world.min().x(), world.max().x()}) {
+            for (double z : new double[]{world.min().z(), world.max().z()}) {
+                // worldToVehicle works in the view's Y-down frame; Y is untouched.
+                Point3D local = worldToVehicle(new Point3D(x, 0, z));
+                minX = Math.min(minX, local.getX());
+                maxX = Math.max(maxX, local.getX());
+                minZ = Math.min(minZ, local.getZ());
+                maxZ = Math.max(maxZ, local.getZ());
+            }
+        }
+        return Aabb.of(minX, world.min().y(), minZ, maxX, world.max().y(), maxZ);
     }
 
     // ---- per-frame update ----
@@ -455,6 +503,12 @@ public final class Crane3DView implements CraneSceneView {
         hookTip.setTranslateY(ropeLength + HOOK_BLOCK_HEIGHT + 0.08);
 
         driveTruck(dt);
+        // Remember the arm in vehicle coordinates: driving has to respect it too,
+        // otherwise the truck could reverse the boom into a stack of containers.
+        armPivotVehicle = slewToVehicle(new Point3D(0, -PILLAR_HEIGHT, 0), slewDeg);
+        armBoomTipVehicle = slewToVehicle(boomPoint(boomLength, 0, boomDeg), slewDeg);
+        armJibTipVehicle = slewToVehicle(jibTip, slewDeg);
+
         Point3D hookWorld = vehicleToWorld(
                 hookVehiclePosition(jibTip, ropeLength, swayDeg, slewDeg));
         updateHookShadow(hookWorld);
@@ -507,6 +561,14 @@ public final class Crane3DView implements CraneSceneView {
         double localY = jibTip.getY() + ropeLength * Math.cos(sway) + HOOK_BLOCK_HEIGHT;
         double slew = Math.toRadians(slewDeg);
         return new Point3D(localX * Math.cos(slew), localY - BED_HEIGHT, -localX * Math.sin(slew));
+    }
+
+    /** Superstructure-local point → vehicle frame (applies slew and the deck offset). */
+    private static Point3D slewToVehicle(Point3D superstructure, double slewDeg) {
+        double slew = Math.toRadians(slewDeg);
+        return new Point3D(superstructure.getX() * Math.cos(slew),
+                superstructure.getY() - BED_HEIGHT,
+                -superstructure.getX() * Math.sin(slew));
     }
 
     // ---- vehicle frame ↔ world frame ----
@@ -563,13 +625,69 @@ public final class Crane3DView implements CraneSceneView {
 
         double heading = Math.toRadians(truckHeadingDeg);
         // Local -X is the cab's forward direction.
-        truckX -= truckSpeed * dt * Math.cos(heading);
-        truckZ += truckSpeed * dt * Math.sin(heading);
+        double nextX = truckX - truckSpeed * dt * Math.cos(heading);
+        double nextZ = truckZ + truckSpeed * dt * Math.sin(heading);
 
         // Keep it on the apron: the quay edge is a hard stop, not a ramp.
-        truckX = Math.clamp(truckX, -APRON_LIMIT_X, APRON_LIMIT_X);
-        truckZ = Math.clamp(truckZ, -APRON_LIMIT_Z, DOCK_EDGE_Z - 4.0);
+        nextX = Math.clamp(nextX, -APRON_LIMIT_X, APRON_LIMIT_X);
+        nextZ = Math.clamp(nextZ, -APRON_LIMIT_Z, DOCK_EDGE_Z - 4.0);
+
+        if (truckWouldHitScenery(nextX, nextZ)) {
+            truckSpeed = 0;   // solid is solid: stop against it, don't drive through
+        } else {
+            truckX = nextX;
+            truckZ = nextZ;
+        }
         applyVehiclePose();
+    }
+
+    /**
+     * Would the truck's body overlap solid scenery at this position? The body is
+     * treated as a capsule along its centreline — cheap, and it matches how the
+     * arm is tested.
+     */
+    private boolean truckWouldHitScenery(double candidateX, double candidateZ) {
+        if (worldObstacles.isEmpty()) {
+            return false;
+        }
+        // Nose and tail in vehicle X, mapped to the candidate world position.
+        Vec3 nose = vehiclePointAt(new Point3D(CAB_CENTRE_X - CAB_LENGTH / 2, -1.0, 0),
+                candidateX, candidateZ);
+        Vec3 tail = vehiclePointAt(new Point3D(BED_REAR_X, -1.0, 0), candidateX, candidateZ);
+
+        for (Aabb obstacle : worldObstacles) {
+            if (obstacle.distanceToSegment(nose, tail) < TRUCK_HALF_WIDTH) {
+                return true;
+            }
+        }
+
+        // The arm travels with the truck, so it has to clear the scenery too.
+        if (armJibTipVehicle != null) {
+            Vec3 pivot = vehiclePointAt(armPivotVehicle, candidateX, candidateZ);
+            Vec3 boomTip = vehiclePointAt(armBoomTipVehicle, candidateX, candidateZ);
+            Vec3 jibTip = vehiclePointAt(armJibTipVehicle, candidateX, candidateZ);
+            for (Aabb obstacle : worldObstacles) {
+                if (obstacle.distanceToSegment(pivot, boomTip) < ARM_CLEARANCE
+                        || obstacle.distanceToSegment(boomTip, jibTip) < ARM_CLEARANCE) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A vehicle-frame point (JavaFX Y-down) placed at a candidate truck position,
+     * expressed in the core's world frame (Y up).
+     */
+    private Vec3 vehiclePointAt(Point3D local, double candidateX, double candidateZ) {
+        double heading = Math.toRadians(truckHeadingDeg);
+        double cos = Math.cos(heading);
+        double sin = Math.sin(heading);
+        return new Vec3(
+                candidateX + local.getX() * cos + local.getZ() * sin,
+                -local.getY(),
+                candidateZ - local.getX() * sin + local.getZ() * cos);
     }
 
     private void applyVehiclePose() {
@@ -939,7 +1057,7 @@ public final class Crane3DView implements CraneSceneView {
      * gives the eye something to judge distance and scale against — the scene
      * reads as a working quay instead of an empty plane.
      */
-    private static Node buildContainerYard() {
+    private Node buildContainerYard() {
         Group yard = new Group();
         Color[] palette = {
                 Color.web("#2f7d8c"), Color.web("#8c5a2f"), Color.web("#3f6b3a"),
@@ -953,12 +1071,20 @@ public final class Crane3DView implements CraneSceneView {
             double baseX = -26 + column * 7.0;
             int stackHeight = 1 + random.nextInt(3);
             for (int level = 0; level < stackHeight; level++) {
+                double x = baseX + random.nextDouble() * 0.4;
+                double z = -24 - random.nextDouble() * 3.0;
+                double centreY = 1.3 + level * 2.6;      // height above ground
+
                 Box container = new Box(6.0, 2.6, 2.4);
                 container.setMaterial(material(palette[random.nextInt(palette.length)], 16));
-                container.setTranslateX(baseX + random.nextDouble() * 0.4);
-                container.setTranslateY(-(1.3 + level * 2.6));
-                container.setTranslateZ(-24 - random.nextDouble() * 3.0);
+                container.setTranslateX(x);
+                container.setTranslateY(-centreY);        // JavaFX Y points down
+                container.setTranslateZ(z);
                 yard.getChildren().add(container);
+
+                // Scenery is solid: record it so the crane and the truck have to
+                // respect it. Core convention is Y up, hence the flipped centre.
+                worldObstacles.add(Aabb.centred(new Vec3(x, centreY, z), 6.0, 2.6, 2.4));
             }
         }
         return yard;

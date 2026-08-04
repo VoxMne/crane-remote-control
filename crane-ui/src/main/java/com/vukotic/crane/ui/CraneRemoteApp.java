@@ -396,12 +396,14 @@ public final class CraneRemoteApp extends Application {
                     operatorInput.keyPressed("T");   // pay out: set it on the bed
                 }),
                 frameAt(13.0, () -> operatorInput.keyReleased("T")),
-                // Then hand over to the driver and pull away with the load aboard.
+                // Then drive at the container yard: the truck must stop against it,
+                // not pass through it.
                 frameAt(18.0, () -> {
                     driverModeButton.setSelected(true);
                     drivingKeys.add(KeyCode.UP);
-                    drivingKeys.add(KeyCode.RIGHT);
+                    drivingKeys.add(KeyCode.LEFT);
                 }),
+                frameAt(23.0, () -> drivingKeys.remove(KeyCode.LEFT)),
                 frameAt(90.0, javafx.application.Platform::exit));
         script.play();
     }

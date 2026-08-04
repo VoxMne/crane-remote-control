@@ -1,10 +1,10 @@
-plugins {
+﻿plugins {
     id("org.openjfx.javafxplugin") version "0.1.0" apply false
 }
 
 allprojects {
     group = "com.vukotic.crane"
-    version = "3.1.0"
+    version = "3.1.1"
 }
 
 subprojects {
