@@ -69,6 +69,10 @@ public final class Crane3DView implements CraneSceneView {
     private static final double BOOM_BASE_LENGTH = 5.0;
     private static final double JIB_LENGTH = 3.0;
     private static final double HOOK_BLOCK_HEIGHT = 0.42;
+    /** Hook within this of a load's top face picks it up; see {@link #cargoPickupArmed}. */
+    private static final double PICKUP_DISTANCE = 0.7;
+    /** …but only once the hook has first been taken this far clear of it. */
+    private static final double PICKUP_ARM_DISTANCE = 1.6;
     private static final double HOOK_GROUND_CLEARANCE = 0.85;
 
     // ---- truck layout, in vehicle-local metres (crane slew axis = local origin) ----
@@ -76,6 +80,9 @@ public final class Crane3DView implements CraneSceneView {
     // crane, which leaves the whole bed behind it free to carry a load.
     private static final double CAB_CENTRE_X = -1.75;
     private static final double CAB_LENGTH = 1.6;
+    private static final double CAB_HALF_WIDTH = 1.2;
+    /** Top of the cab box, world Y (downwards): its centre is at -(0.55 + 1.75/2). */
+    private static final double CAB_ROOF_Y = -(0.55 + 1.75);
     private static final double BED_FRONT_X = -0.85;   // just behind the slew ring
     private static final double BED_REAR_X = 6.15;
     private static final double BED_HALF_WIDTH = 1.2;
@@ -200,6 +207,13 @@ public final class Crane3DView implements CraneSceneView {
     /** True while a set-down load is carried by the truck bed (so it drives along). */
     private boolean cargoOnVehicle;
     private double cargoFallSpeed;
+    /**
+     * False from the moment a load is set down or released until the hook has been
+     * taken clear of it again. Without this the hook, which now correctly stops
+     * just above the load instead of sinking through it, would sit inside pickup
+     * range forever and snatch the load straight back up.
+     */
+    private boolean cargoPickupArmed;
     /** Resting position: world coordinates, or vehicle-local while on the bed. */
     private double cargoX;
     private double cargoY;
@@ -361,6 +375,7 @@ public final class Crane3DView implements CraneSceneView {
         cargoAttached = true;
         cargoOnVehicle = false;
         cargoFallSpeed = 0;
+        cargoPickupArmed = false;
     }
 
     public CargoType cargo() {
@@ -403,6 +418,7 @@ public final class Crane3DView implements CraneSceneView {
         if (cargoType != CargoType.NONE && cargoAttached) {
             cargoAttached = false;
             cargoFallSpeed = 0;
+            cargoPickupArmed = false;
         }
     }
 
@@ -491,11 +507,9 @@ public final class Crane3DView implements CraneSceneView {
         jibRam.aim(boomPoint(boomLength - 1.1, -0.24, boomDeg),
                 jibPoint(1.2, 0.20, boomDeg, jibDeg, boomLength));
 
-        // Rope length, clamped so the hook stays above the ground like the 2D view.
+        // Rope length, clamped so the hook stops on whatever is actually under it.
         Point3D jibTip = jibPoint(JIB_LENGTH, 0, boomDeg, jibDeg, boomLength);
-        double jibTipHeight = BED_HEIGHT - jibTip.getY();
-        double ropeLength = Math.clamp(ropeOut, 0.0,
-                Math.max(0.0, jibTipHeight - HOOK_GROUND_CLEARANCE));
+        double ropeLength = payableRope(ropeOut, jibTip, swayDeg, slewDeg);
         rope.setHeight(Math.max(ropeLength, 0.001));
         rope.setTranslateY(ropeLength / 2);
         rope.setVisible(ropeLength > 0.02);
@@ -517,6 +531,56 @@ public final class Crane3DView implements CraneSceneView {
         bobBoat();
 
         estopBanner.setVisible(state.estopLatched());
+    }
+
+    /**
+     * How much rope may be paid out before the hook reaches the surface below it.
+     *
+     * <p>This used to clamp against the ground alone, which meant the rope and the
+     * hook block sank straight through the deck, through the cab roof and through
+     * a container standing on the bed — the winch simply did not know anything was
+     * there. The surface is now whatever is really underneath: a set-down load, the
+     * deck, the cab, or the ground.
+     *
+     * <p>The surface is probed at the hook position the requested length would
+     * give. Sway moves the hook by centimetres, so one pass is enough; iterating
+     * would only chase its own tail.
+     */
+    private double payableRope(double requested, Point3D jibTip,
+                               double swayDeg, double slewDeg) {
+        double tipY = jibTip.getY() - BED_HEIGHT;   // world Y, measured downwards
+        double toGround = Math.max(0.0, -tipY - HOOK_GROUND_CLEARANCE);
+        double probe = Math.clamp(requested, 0.0, toGround);
+
+        Point3D hook = vehicleToWorld(hookVehiclePosition(jibTip, probe, swayDeg, slewDeg));
+        return Math.clamp(requested, 0.0,
+                ropeToSurface(tipY, surfaceUnder(hook.getX(), hook.getZ())));
+    }
+
+    /**
+     * World Y of the first solid thing under a point: a load standing there, the
+     * truck (deck or cab roof), or the ground. Y is measured downwards, so the
+     * highest surface is the most negative number — hence {@code min}.
+     */
+    private double surfaceUnder(double worldX, double worldZ) {
+        double surface = supportHeight(worldX, worldZ);
+        if (cargoType != CargoType.NONE && !cargoAttached && overRestingLoad(worldX, worldZ)) {
+            surface = Math.min(surface,
+                    restingWorldPosition().getY() - cargoType.height() / 2);
+        }
+        return surface;
+    }
+
+    /**
+     * Whether a point is over the footprint of the set-down load. Axis-aligned in
+     * the vehicle frame, matching how {@link #loadObstacles()} already describes
+     * that load to the core's interference guard.
+     */
+    private boolean overRestingLoad(double worldX, double worldZ) {
+        Point3D point = worldToVehicle(new Point3D(worldX, 0, worldZ));
+        Point3D load = worldToVehicle(restingWorldPosition());
+        return Math.abs(point.getX() - load.getX()) < cargoType.length() / 2
+                && Math.abs(point.getZ() - load.getZ()) < cargoType.width() / 2;
     }
 
     /** Seconds since the previous update, clamped against pauses and hiccups. */
@@ -737,6 +801,7 @@ public final class Crane3DView implements CraneSceneView {
                 setCargoRest(hanging.getX(), resting, hanging.getZ());
                 cargoAttached = false;
                 cargoFallSpeed = 0;
+                cargoPickupArmed = false;
             } else {
                 cargoOnVehicle = false;
                 cargoX = hanging.getX();
@@ -760,8 +825,14 @@ public final class Crane3DView implements CraneSceneView {
                 setCargoRest(world.getX(), resting, world.getZ());
             }
 
+            // Pick-up: the hook has to be taken clear of the load and brought back,
+            // the way a slinger unhooks and re-hooks. Proximity alone would mean a
+            // load could never be left standing under the hook.
             Point3D top = new Point3D(world.getX(), world.getY() - halfHeight, world.getZ());
-            if (cargoFallSpeed == 0 && hookWorld.distance(top) < 0.7) {
+            double reach = hookWorld.distance(top);
+            if (reach > PICKUP_ARM_DISTANCE) {
+                cargoPickupArmed = true;
+            } else if (cargoPickupArmed && cargoFallSpeed == 0 && reach < PICKUP_DISTANCE) {
                 cargoAttached = true;
             }
         }
@@ -777,7 +848,7 @@ public final class Crane3DView implements CraneSceneView {
     /** Stores a resting position, choosing the frame that carries the load. */
     private void setCargoRest(double worldX, double worldY, double worldZ) {
         Point3D local = worldToVehicle(new Point3D(worldX, worldY, worldZ));
-        cargoOnVehicle = isOverBed(local.getX(), local.getZ());
+        cargoOnVehicle = isOnVehicle(local.getX(), local.getZ());
         if (cargoOnVehicle) {
             cargoX = local.getX();
             cargoZ = local.getZ();
@@ -794,15 +865,45 @@ public final class Crane3DView implements CraneSceneView {
                 : new Point3D(cargoX, cargoY, cargoZ);
     }
 
-    /** Height (world Y) of the surface under a point: the truck bed, or the ground. */
+    /**
+     * Height (world Y, downwards) of the truck surface under a point: the cab
+     * roof, the deck, or the ground. The cab used to be missing here, so a load
+     * swung over the cab was lowered straight through its roof.
+     */
     private double supportHeight(double worldX, double worldZ) {
         Point3D local = worldToVehicle(new Point3D(worldX, 0, worldZ));
-        return isOverBed(local.getX(), local.getZ()) ? -BED_HEIGHT : 0.0;
+        return surfaceHeightLocal(local.getX(), local.getZ());
+    }
+
+    /** The truck-surface part of {@link #supportHeight}, in vehicle coordinates. */
+    static double surfaceHeightLocal(double localX, double localZ) {
+        if (isOverCab(localX, localZ)) {
+            return CAB_ROOF_Y;
+        }
+        return isOverBed(localX, localZ) ? -BED_HEIGHT : 0.0;
+    }
+
+    /**
+     * Rope payable from a jib tip at world height {@code tipY} down to a surface at
+     * {@code surfaceY}, both measured downwards, leaving the hook its clearance.
+     */
+    static double ropeToSurface(double tipY, double surfaceY) {
+        return Math.max(0.0, surfaceY - tipY - HOOK_GROUND_CLEARANCE);
     }
 
     private static boolean isOverBed(double localX, double localZ) {
         return localX > BED_FRONT_X && localX < BED_REAR_X
                 && Math.abs(localZ) < BED_HALF_WIDTH;
+    }
+
+    private static boolean isOverCab(double localX, double localZ) {
+        return Math.abs(localX - CAB_CENTRE_X) < CAB_LENGTH / 2
+                && Math.abs(localZ) < CAB_HALF_WIDTH;
+    }
+
+    /** Anything standing on the truck rides with it — deck or cab roof alike. */
+    private static boolean isOnVehicle(double localX, double localZ) {
+        return isOverBed(localX, localZ) || isOverCab(localX, localZ);
     }
 
     /**

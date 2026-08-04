@@ -248,6 +248,19 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — `AppPaths`: profiles and recordings go to a per-user folder when the app is
       installed, instead of a working directory the user may not be able to write to
 
+## V3.4.1 — the winch could not see the truck (reported from the field)
+- [x] DONE — Rope length was clamped against the **ground only**, so paying out over the
+      truck ran the rope and the hook straight through the deck, through the cab roof and
+      through a container standing on the bed. Both views now clamp against the surface
+      actually under the hook: a set-down load, the deck, the cab roof, or the ground
+- [x] DONE — The cab was missing from the cargo support surfaces entirely — a load swung
+      over the cab was lowered through its roof onto the ground
+- [x] DONE — Pick-up is armed rather than automatic. The hook now stops just above a
+      set-down load, which is inside the old proximity range, so a load would have been
+      snatched straight back up. It must be taken clear (1.6 m) before it will re-hook
+- [x] DONE — Tests: `HookClearanceTest` pins the surface heights and the rope arithmetic,
+      including that the hook ends up clear of a load but still within pick-up reach
+
 ## Known limits (honest scope)
 - Collision covers the **arm** against the cab, deck, ground and set-down loads. It is
   not a rigid-body physics engine: no rope dynamics, no tipping, no contact friction,

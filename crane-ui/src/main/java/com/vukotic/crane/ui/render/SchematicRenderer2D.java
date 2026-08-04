@@ -303,8 +303,14 @@ public final class SchematicRenderer2D implements CraneRenderer {
         // Rope (dashed) + hook block, hanging from the jib tip and deflected from
         // vertical by the optional "loadSway" pendulum angle (reads 0 when absent).
         double blockWidth = 0.34, blockHeight = 0.42, hookDrop = 0.32;
+        // How far the hook may come down: it has to stop on whatever is beneath
+        // it — the truck deck or the ground — with the load, if any, standing on
+        // that surface rather than sunk into it. Clamping against the ground alone
+        // ran the rope and the hook straight through the bed.
+        double surfaceY = jibTipX > BED_FRONT_X && jibTipX < BED_REAR_X ? BED_HEIGHT : 0.0;
+        double hookFloorY = surfaceY + cargo.height() + blockHeight + hookDrop + 0.1;
         double ropeLen = Math.max(0.0,
-                jibTipY - Math.max(jibTipY - rope, blockHeight + hookDrop + 0.1));
+                jibTipY - Math.max(jibTipY - rope, hookFloorY));
         double swayRad = Math.toRadians(state.position("loadSway"));
         double hookX = jibTipX + ropeLen * Math.sin(swayRad);
         double hookY = jibTipY - ropeLen * Math.cos(swayRad);

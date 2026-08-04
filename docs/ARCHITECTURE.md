@@ -162,6 +162,20 @@ noted in docs/BACKLOG.md.)
   presses. The safety flags (deadman, E-STOP, reset) still pass through untouched.
   Driving itself is a simple bicycle model — steering only bites while rolling.
 
+## What the winch is allowed to do (V3.4.1)
+The rope used to be clamped against the ground and nothing else, so paying out over
+the truck ran the rope and the hook through the deck, through the cab roof, and
+through a container standing on the bed. Both renderers now clamp against the
+surface genuinely under the hook, in this order: a set-down load → the cab roof →
+the deck → the ground. `Crane3DView.surfaceHeightLocal` and `ropeToSurface` are the
+testable halves; `HookClearanceTest` pins them.
+
+Consequence worth knowing: the hook now parks just above a load instead of sinking
+past it, which is *inside* the old proximity radius for picking a load back up. So
+pick-up is armed rather than automatic — the hook has to be taken clear of the load
+(1.6 m) before it will hook it again. Without that pairing, a load could be set down
+and would instantly be snatched back up.
+
 ## 3D view landmines (learned the hard way)
 - **`SubScene.setFill(...)` must be a solid `Color`.** With a `LinearGradient` fill the
   SubScene's buffer is never cleared between frames, so moving geometry (boom, hook,
