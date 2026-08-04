@@ -195,6 +195,32 @@ right panel:
 The load is drawn in **both** views — the 2D view shows it as a labelled silhouette under
 the hook — so switching between 2D and 3D never changes what is on the hook.
 
+Loads behave like objects, not decals: they rest on whatever is underneath (the truck
+deck or the ground), they are pushed clear of the mast instead of passing through the
+crane, and a released load falls under gravity.
+
+## 7a. Loading the truck, and driving it
+
+The crane is mounted **right behind the cab**, so the whole bed behind it is free to
+carry a load — exactly how a real loader crane is arranged.
+
+**To load the truck:** hook a load, raise the boom until the hook comes down over the
+deck (with the boom low the crane reaches *past* the tail of the truck), then pay out
+rope with `T` until it settles on the deck.
+
+**RELEASE LOAD** unhooks the load where it hangs — in reality the ground crew does this,
+the crane cannot drop anything by itself. The button greys out when nothing is hooked.
+
+**DRIVER MODE** switches from operating the crane to driving the truck:
+
+- The crane is **locked out completely** — every axis demand is forced to zero while
+  the mode is on. You are either on the remote or behind the wheel, never both.
+- Drive with the **arrow keys**: `↑` throttle, `↓` brake and reverse, `←`/`→` steer.
+  Steering only works while the truck is rolling, like a real vehicle.
+- Anything resting on the deck rides along with the truck.
+- The camera follows the truck, and the **Cab** camera looks up the road instead of at
+  the load.
+
 ---
 
 ## 8. Recording telemetry

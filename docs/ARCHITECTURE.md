@@ -83,6 +83,25 @@ overlays the center pane; the choice survives profile switches, views are recrea
 profile. Both views deflect the rope by the optional `"loadSway"` state entry (0 when
 absent) and show the E-STOP banner.
 
+## Vehicle, loads and driver mode (V3)
+- **Layout.** The crane's slew axis is the *vehicle* origin. The cab sits ahead of it
+  (−X) and the load bed runs behind it (+X), exactly like a real loader crane, so the
+  crane can set a load down on its own deck. `Crane3DView` and `SchematicRenderer2D`
+  share these constants and must be changed together.
+- **Frames.** The truck is a rigid body: `vehicle = truck + superstructure`, moved by
+  `vehicleTranslate`/`vehicleRotate`. Anything computed for the crane is produced in
+  vehicle coordinates and lifted into the world with `vehicleToWorld`.
+- **Loads rest on surfaces.** `supportHeight()` returns the deck when a load is over
+  the bed footprint and the ground otherwise; a hanging load is never allowed below it,
+  and `pushClearOfMast()` keeps it out of the mast, so cargo no longer passes through
+  the crane. A released load falls under gravity onto that surface.
+- **A load on the deck is stored in vehicle coordinates**, so it rides along when the
+  truck is driven; a load on the ground stays in world coordinates.
+- **Driver mode** is a hard interlock, not a mood: while it is on, the UI submits
+  neutral axis demands every tick, so the crane cannot move no matter what the operator
+  presses. The safety flags (deadman, E-STOP, reset) still pass through untouched.
+  Driving itself is a simple bicycle model — steering only bites while rolling.
+
 ## 3D view landmines (learned the hard way)
 - **`SubScene.setFill(...)` must be a solid `Color`.** With a `LinearGradient` fill the
   SubScene's buffer is never cleared between frames, so moving geometry (boom, hook,
@@ -93,6 +112,9 @@ absent) and show the E-STOP banner.
   the snapshot probe showed a clean crane while the on-screen window smeared. Rendering
   regressions must be verified by capturing the actual window
   (`scripts/capture-window.ps1`), not by snapshots.
+- **A diffuse map and a diffuse colour multiply.** `new PhongMaterial(colour)` plus
+  `setDiffuseMap(...)` squares the colour and renders almost black; textured materials
+  must keep `Color.WHITE` as the diffuse colour (see `texturedMaterial`).
 
 ## 3D world (M5)
 Everything is procedural — `MeshFactory` builds `TriangleMesh` shapes (tapered,

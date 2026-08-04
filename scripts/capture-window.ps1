@@ -41,9 +41,17 @@ public class CraneCapture {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(
       IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
+
+# A minimised window reports a stub rectangle, so restore it before measuring.
+if ([CraneCapture]::IsIconic($process.MainWindowHandle)) {
+    [CraneCapture]::ShowWindow($process.MainWindowHandle, 9) | Out-Null  # SW_RESTORE
+    Start-Sleep -Seconds 1
+}
 
 $HWND_TOPMOST = [IntPtr]::new(-1)
 $HWND_NOTOPMOST = [IntPtr]::new(-2)
@@ -60,6 +68,10 @@ $rect = New-Object CraneCapture+RECT
 Add-Type -AssemblyName System.Drawing
 $width = $rect.Right - $rect.Left
 $height = $rect.Bottom - $rect.Top
+if ($width -le 0 -or $height -le 0) {
+    Write-Error "Window has no size - it probably closed during the delay. Lower -DelaySeconds."
+    exit 1
+}
 $bitmap = New-Object System.Drawing.Bitmap $width, $height
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)

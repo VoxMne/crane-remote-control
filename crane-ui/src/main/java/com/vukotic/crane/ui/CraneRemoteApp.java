@@ -137,6 +137,13 @@ public final class CraneRemoteApp extends Application {
     private CameraMode cameraChoice = CameraMode.ORBIT;
     private CargoType cargoChoice = CargoType.NONE;
 
+    // Driver mode: crane locked out, truck drivable with the arrow keys.
+    private boolean driverMode;
+    private ToggleButton driverModeButton;
+    private Label driverInfo;
+    private Button releaseButton;
+    private final Set<KeyCode> drivingKeys = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     // Assists: toggle choices survive profile switches; the sequencer never does.
     private final AutoSequencer foldSequencer = new AutoSequencer();
     private boolean smoothingOn;
@@ -200,6 +207,7 @@ public final class CraneRemoteApp extends Application {
                 if (command == null) {
                     return;
                 }
+                updateDriving();
                 updateReadouts(command, state);
                 activeView.update(profile, state);
             }
@@ -228,7 +236,14 @@ public final class CraneRemoteApp extends Application {
                     CraneProfile activeProfile = profile;
                     if (input != null && activeBackend != null && activeProfile != null) {
                         CraneCommand command = input.snapshot(System.currentTimeMillis());
-                        if (foldSequencer.isActive()) {
+                        if (driverMode) {
+                            // Crane lockout: the driver is in the cab, not on the
+                            // remote. Safety flags still pass through untouched.
+                            command = new CraneCommand(command.timestampMillis(),
+                                    CraneCommand.neutral(activeProfile).axisDemands(),
+                                    command.deadmanHeld(), command.estopRequested(),
+                                    command.resetRequested());
+                        } else if (foldSequencer.isActive()) {
                             command = foldSequencer.next(activeBackend.latestState(), command);
                         }
                         activeBackend.submitCommand(command);
@@ -353,12 +368,30 @@ public final class CraneRemoteApp extends Application {
                     activeView = view3d;
                     viewStack.getChildren().set(0, activeView.node());
                 }),
+                // At slew 0 the boom already points along the bed, so paying out
+                // rope lowers the load straight onto the deck.
+                frameAt(0.8, () -> {
+                    cargoChoice = CargoType.CONTAINER;
+                    applyCargo();
+                }),
                 frameAt(1.0, () -> {
                     operatorInput.keyPressed("SPACE");
-                    operatorInput.keyPressed("Q");
-                    operatorInput.keyPressed("W");
+                    operatorInput.keyPressed("W");   // raise the boom clear
                 }),
-                frameAt(25.0, javafx.application.Platform::exit));
+                // Boom high enough that the hook comes down over the deck rather
+                // than past the tail of the truck.
+                frameAt(7.0, () -> {
+                    operatorInput.keyReleased("W");
+                    operatorInput.keyPressed("T");   // pay out: set it on the bed
+                }),
+                frameAt(13.0, () -> operatorInput.keyReleased("T")),
+                // Then hand over to the driver and pull away with the load aboard.
+                frameAt(18.0, () -> {
+                    driverModeButton.setSelected(true);
+                    drivingKeys.add(KeyCode.UP);
+                    drivingKeys.add(KeyCode.RIGHT);
+                }),
+                frameAt(90.0, javafx.application.Platform::exit));
         script.play();
     }
 
@@ -471,6 +504,9 @@ public final class CraneRemoteApp extends Application {
         panel.getChildren().add(sectionLabel("ASSIST"));
         panel.getChildren().add(buildAssistControls());
 
+        panel.getChildren().add(sectionLabel("TRUCK & LOAD"));
+        panel.getChildren().add(buildTruckControls());
+
         estopButton = new ToggleButton("E-STOP");
         estopButton.setMinHeight(84);
         estopButton.setMaxWidth(Double.MAX_VALUE);
@@ -565,6 +601,42 @@ public final class CraneRemoteApp extends Application {
         return new VBox(6, new HBox(6, smoothToggle, antiSwayToggle), foldButton, foldStatus);
     }
 
+    /**
+     * Driver mode and load release. Driver mode locks the crane out completely —
+     * you are either operating the crane or driving the truck, never both, which
+     * is exactly how the real machine is used.
+     */
+    private VBox buildTruckControls() {
+        driverModeButton = new ToggleButton("DRIVER MODE");
+        driverModeButton.setMaxWidth(Double.MAX_VALUE);
+        driverModeButton.setFocusTraversable(false);
+        driverModeButton.setSelected(driverMode);
+        driverModeButton.setStyle(assistStyle(driverMode));
+        driverModeButton.selectedProperty().addListener((obs, was, selected) -> {
+            driverMode = selected;
+            driverModeButton.setStyle(assistStyle(selected));
+            view3d.setDriverMode(selected);
+            if (selected) {
+                foldSequencer.cancel();      // no automation while driving
+            }
+        });
+
+        releaseButton = new Button("RELEASE LOAD");
+        releaseButton.setMaxWidth(Double.MAX_VALUE);
+        releaseButton.setMinHeight(34);
+        releaseButton.setFocusTraversable(false);
+        releaseButton.setStyle("-fx-background-color: " + BG + "; -fx-text-fill: " + TEXT + ";"
+                + " -fx-border-color: " + TEXT_DIM + "; -fx-border-radius: 6;"
+                + " -fx-background-radius: 6; -fx-font-weight: bold; -fx-font-size: 11px;");
+        releaseButton.setOnAction(event -> view3d.releaseCargo());
+
+        driverInfo = new Label("crane active · truck parked");
+        driverInfo.setWrapText(true);
+        driverInfo.setStyle("-fx-text-fill: " + TEXT_DIM + "; -fx-font-size: 11px;");
+
+        return new VBox(6, driverModeButton, releaseButton, driverInfo);
+    }
+
     private static String assistStyle(boolean on) {
         String color = on ? AMBER : TEXT_DIM;
         return "-fx-background-color: " + BG + "; -fx-text-fill: " + color + ";"
@@ -602,6 +674,7 @@ public final class CraneRemoteApp extends Application {
         view2d = new Schematic2DView();
         view3d = new Crane3DView();
         view3d.setCameraMode(cameraChoice);
+        view3d.setDriverMode(driverMode);
         applyCargo();
 
         viewStack = new StackPane();
@@ -927,6 +1000,11 @@ public final class CraneRemoteApp extends Application {
                 event.consume();
                 return;
             }
+            if (isDrivingKey(event.getCode())) {
+                drivingKeys.add(event.getCode());
+                event.consume();
+                return;
+            }
             String key = event.getCode().name();
             if (keyBindings.isEstopKey(key)) {
                 estopButton.setSelected(true); // listener forwards to operatorInput
@@ -937,12 +1015,40 @@ public final class CraneRemoteApp extends Application {
             }
         });
         scene.addEventFilter(KeyEvent.KEY_RELEASED, event -> {
+            if (isDrivingKey(event.getCode())) {
+                drivingKeys.remove(event.getCode());
+                event.consume();
+                return;
+            }
             String key = event.getCode().name();
             if (keyBindings.isBound(key)) {
                 operatorInput.keyReleased(key);
                 event.consume();
             }
         });
+    }
+
+    private static boolean isDrivingKey(KeyCode code) {
+        return code == KeyCode.UP || code == KeyCode.DOWN
+                || code == KeyCode.LEFT || code == KeyCode.RIGHT;
+    }
+
+    /** Feeds the arrow keys to the truck; only has an effect in driver mode. */
+    private void updateDriving() {
+        double throttle = (drivingKeys.contains(KeyCode.UP) ? 1 : 0)
+                - (drivingKeys.contains(KeyCode.DOWN) ? 1 : 0);
+        double steer = (drivingKeys.contains(KeyCode.RIGHT) ? 1 : 0)
+                - (drivingKeys.contains(KeyCode.LEFT) ? 1 : 0);
+        view3d.setDriveInput(throttle, steer);
+
+        if (driverInfo != null) {
+            driverInfo.setText(driverMode
+                    ? String.format("driving · %.0f km/h · arrow keys", view3d.truckSpeedKmh())
+                    : "crane active · truck parked");
+        }
+        if (releaseButton != null) {
+            releaseButton.setDisable(!view3d.isCargoAttached());
+        }
     }
 
     // ---- per-frame refresh ----

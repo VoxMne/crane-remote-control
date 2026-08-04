@@ -41,6 +41,11 @@ harbour scene with four camera modes (orbit / cab / hook / follow) and a selecta
 that can be set down and picked back up; radial + bar gauges; synthesized cockpit audio
 (hydraulic hum, motion beeper, alarm buzzer) with a MUTE toggle.
 
+**v3 additions:** the crane is mounted behind the cab with a free load bed behind it, so
+you can pick a load off the ground and set it on the truck; loads rest on real surfaces
+and no longer pass through the crane; RELEASE LOAD unhooks it; and DRIVER MODE locks the
+crane out and lets you drive the truck away with the load aboard (arrow keys).
+
 ## Docs
 - **[User Guide](docs/USER_GUIDE.md) — start here if you just want to drive the crane**
 - [Vision](docs/VISION.md) · [Architecture](docs/ARCHITECTURE.md) ·

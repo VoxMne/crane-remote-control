@@ -181,6 +181,22 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       `Scene.snapshot()` renders offscreen and is blind to on-screen artefacts —
       the reason this bug survived three releases of "verified" screenshots
 
+## V3.0.0 — truck, loads and driving
+- [x] DONE — Crane remounted directly behind the cab; truck rebuilt around it with a
+      7 m load bed behind the mast (2D and 3D share the layout constants)
+- [x] DONE — Truck + crane are one rigid body (`vehicle` group); all crane geometry is
+      computed in vehicle coordinates and lifted to world with `vehicleToWorld`
+- [x] DONE — Load physics: rests on the deck or the ground, pushed clear of the mast
+      instead of clipping through the crane, falls under gravity when released;
+      a load on the deck rides along when the truck drives
+- [x] DONE — RELEASE LOAD button (the ground crew unhooking), disabled when nothing hooked
+- [x] DONE — DRIVER MODE: crane hard-locked to zero demand, truck driven with the arrow
+      keys (bicycle model, steering only while rolling), camera follows the truck
+- [x] DONE — Graphics: antialiasing restored, procedural concrete/deck/quay textures,
+      specular materials, fill light, outriggers, exhaust, beacon, side rails
+- [x] DONE — Verified by real-window capture: load set on the deck, truck driving away
+      with it at 13 km/h
+
 ## Saved for later (V2 items 8-24)
 - LMI + capacity charts · outriggers/tipping · hydraulic realism · wind · 2-axis sway
 - point-and-lift · geofencing · training mode · replay

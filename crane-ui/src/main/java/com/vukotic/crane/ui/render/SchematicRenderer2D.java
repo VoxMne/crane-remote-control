@@ -44,6 +44,10 @@ public final class SchematicRenderer2D implements CraneRenderer {
     private static final double WORLD_WIDTH = 18.0;   // world window width
     private static final double WORLD_HEIGHT = 13.0;  // world window height
     private static final double BED_HEIGHT = 1.1;     // chassis top above ground
+    // Truck layout, mirroring Crane3DView: the mast sits at x = 0, the cab ahead
+    // of it, and the load bed behind it.
+    private static final double BED_FRONT_X = -0.85;
+    private static final double BED_REAR_X = 6.15;
     private static final double PILLAR_HEIGHT = 2.0;
     private static final double BOOM_BASE_LENGTH = 5.0;
     private static final double JIB_LENGTH = 3.0;
@@ -233,18 +237,19 @@ public final class SchematicRenderer2D implements CraneRenderer {
         g.setStroke(TRUCK_LINE);
         g.setLineWidth(1.5);
 
-        double bedLeft = -4.2, bedRight = 2.8;
+        // Layout must mirror Crane3DView: cab ahead of the mast, load bed behind it.
+        double bedLeft = BED_FRONT_X, bedRight = BED_REAR_X;
         g.fillRect(sx(bedLeft), sy(BED_HEIGHT), (bedRight - bedLeft) * scale, (BED_HEIGHT - 0.55) * scale);
         g.strokeRect(sx(bedLeft), sy(BED_HEIGHT), (bedRight - bedLeft) * scale, (BED_HEIGHT - 0.55) * scale);
 
-        double cabLeft = -5.7, cabRight = -4.2, cabTop = 2.3;
+        double cabLeft = -2.55, cabRight = -0.95, cabTop = 2.3;
         g.fillRoundRect(sx(cabLeft), sy(cabTop), (cabRight - cabLeft) * scale, (cabTop - 0.55) * scale,
                 0.4 * scale, 0.4 * scale);
         g.strokeRoundRect(sx(cabLeft), sy(cabTop), (cabRight - cabLeft) * scale, (cabTop - 0.55) * scale,
                 0.4 * scale, 0.4 * scale);
 
         double wheelRadius = 0.55;
-        for (double wheelX : new double[]{-4.9, -3.3, 0.9, 2.1}) {
+        for (double wheelX : new double[]{-2.1, 3.65, 4.95}) {
             g.setFill(TRUCK_FILL);
             g.fillOval(sx(wheelX - wheelRadius), sy(wheelRadius * 2),
                     wheelRadius * 2 * scale, wheelRadius * 2 * scale);
@@ -347,9 +352,11 @@ public final class SchematicRenderer2D implements CraneRenderer {
         if (type == CargoType.NONE) {
             return;
         }
-        // Rest on the ground once lowered, exactly like the 3D view's cargo.
+        // Rest on whatever is underneath — the truck deck or the ground — so the
+        // two views agree about where a load ends up.
         double height = type.height();
-        double bottomY = Math.max(0.0, topY - height);
+        double support = centreX > BED_FRONT_X && centreX < BED_REAR_X ? BED_HEIGHT : 0.0;
+        double bottomY = Math.max(support, topY - height);
         double drawTopY = bottomY + height;
         double length = type.length();
 

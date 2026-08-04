@@ -13,6 +13,7 @@ import javafx.scene.SceneAntialiasing;
 import javafx.scene.SubScene;
 import javafx.scene.control.Label;
 import javafx.scene.layout.StackPane;
+import javafx.scene.image.Image;
 import javafx.scene.image.PixelWriter;
 import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
@@ -64,10 +65,34 @@ public final class Crane3DView implements CraneSceneView {
     private static final double HOOK_BLOCK_HEIGHT = 0.42;
     private static final double HOOK_GROUND_CLEARANCE = 0.85;
 
+    // ---- truck layout, in vehicle-local metres (crane slew axis = local origin) ----
+    // The crane is mounted directly behind the cab, exactly like a real loader
+    // crane, which leaves the whole bed behind it free to carry a load.
+    private static final double CAB_CENTRE_X = -1.75;
+    private static final double CAB_LENGTH = 1.6;
+    private static final double BED_FRONT_X = -0.85;   // just behind the slew ring
+    private static final double BED_REAR_X = 6.15;
+    private static final double BED_HALF_WIDTH = 1.2;
+    private static final double BED_CENTRE_X = (BED_FRONT_X + BED_REAR_X) / 2;
+    private static final double BED_LENGTH = BED_REAR_X - BED_FRONT_X;
+    /** Loads may not be set down inside this radius of the mast. */
+    private static final double MAST_KEEP_OUT_RADIUS = 0.95;
+
+    // ---- driving ----
+    private static final double MAX_SPEED = 7.0;          // m/s
+    private static final double ACCELERATION = 3.2;       // m/s²
+    private static final double BRAKE_DECELERATION = 6.0; // m/s²
+    private static final double ROLLING_DRAG = 0.9;       // 1/s
+    private static final double STEER_RATE = 42.0;        // deg/s at full speed
+    private static final double APRON_LIMIT_X = 26.0;
+    private static final double APRON_LIMIT_Z = 26.0;
+    private static final double GRAVITY = 9.81;
+
     // ---- palette ----
-    private static final Color GROUND = Color.web("#1b2129");
-    private static final Color GRID = Color.web("#2b3743");
+    private static final Color GROUND = Color.web("#39414c");   // lit concrete apron
+    private static final Color GRID = Color.web("#4b5867");
     private static final Color TRUCK_FILL = Color.web("#39434f");
+    private static final Color BED_DECK = Color.web("#4a4136");
     private static final Color TRUCK_DARK = Color.web("#252d36");
     private static final Color GLASS = Color.web("#16202b");
     private static final Color WHEEL = Color.web("#15191e");
@@ -95,14 +120,15 @@ public final class Crane3DView implements CraneSceneView {
     // ---- camera rig ----
     private static final double MIN_DISTANCE = 6.0;
     private static final double MAX_DISTANCE = 120.0;
+    /** Orbit pivot, in vehicle coordinates so the camera rides with the truck. */
     private static final Point3D ORBIT_CENTRE =
             new Point3D(2.5, -(BED_HEIGHT + PILLAR_HEIGHT + 1.0), 0);
     /**
-     * Operator eye point for {@link CameraMode#CAB}: at the cab's side window and
-     * offset in Z, so the line of sight to the load passes beside the crane pillar
-     * instead of straight through it.
+     * Operator eye point for {@link CameraMode#CAB}, in vehicle coordinates: at
+     * the cab's side window and offset in Z, so the line of sight to the load
+     * passes beside the mast instead of straight through it.
      */
-    private static final Point3D CAB_EYE = new Point3D(-5.2, -2.5, -2.4);
+    private static final Point3D CAB_EYE = new Point3D(-2.3, -2.6, -2.5);
     private static final double TRANSITION_SECONDS = 0.6;
 
     private final Translate camCentre = new Translate(
@@ -150,9 +176,24 @@ public final class Crane3DView implements CraneSceneView {
 
     private CargoType cargoType = CargoType.NONE;
     private boolean cargoAttached = true;
+    /** True while a set-down load is carried by the truck bed (so it drives along). */
+    private boolean cargoOnVehicle;
+    private double cargoFallSpeed;
+    /** Resting position: world coordinates, or vehicle-local while on the bed. */
     private double cargoX;
     private double cargoY;
     private double cargoZ;
+
+    // ---- vehicle pose and driving ----
+    private final Translate vehicleTranslate = new Translate();
+    private final Rotate vehicleRotate = new Rotate(0, Rotate.Y_AXIS);
+    private double truckX;
+    private double truckZ;
+    private double truckHeadingDeg;   // 0 = nose along -X, matching the cab's side
+    private double truckSpeed;
+    private boolean driverMode;
+    private double driveThrottle;     // -1 reverse … +1 forward
+    private double driveSteer;        // -1 left … +1 right
 
     private final StackPane container = new StackPane();
     private final Label estopBanner;
@@ -223,25 +264,35 @@ public final class Crane3DView implements CraneSceneView {
         cameraRig.getTransforms().addAll(camCentre, camAzimuth, camElevation);
 
         // ---- lighting: warm sun key + cool ambient fill ----
-        AmbientLight ambient = new AmbientLight(Color.rgb(104, 110, 118));
-        PointLight sunLight = new PointLight(Color.rgb(255, 244, 214));
+        AmbientLight ambient = new AmbientLight(Color.rgb(126, 132, 142));
+        PointLight sunLight = new PointLight(Color.rgb(255, 246, 222));
         sunLight.setTranslateX(-42);
         sunLight.setTranslateY(-58);
         sunLight.setTranslateZ(-34);
+        // A dim fill from the opposite side keeps shadowed faces readable
+        // instead of going black — the cheap stand-in for bounced light.
+        PointLight fillLight = new PointLight(Color.rgb(96, 108, 124));
+        fillLight.setTranslateX(38);
+        fillLight.setTranslateY(-26);
+        fillLight.setTranslateZ(30);
 
         hookShadow = buildBlobShadow(0.55);
         hookShadow.getTransforms().addAll(hookShadowTranslate, hookShadowScale);
 
         cargoGroup.getTransforms().addAll(cargoTranslate, cargoRotate);
 
-        Group worldRoot = new Group(ambient, sunLight, buildSkyDome(), buildSun(), buildGround(),
-                buildWaterAndDock(), buildStaticShadows(), buildTruck(),
-                hookShadow, superstructure, cargoGroup, cameraRig);
+        // The truck and the crane it carries are one rigid body: driving the truck
+        // moves the crane (and anything resting on the bed) with it.
+        Group vehicle = new Group(buildVehicleShadow(), buildTruck(), superstructure);
+        vehicle.getTransforms().addAll(vehicleTranslate, vehicleRotate);
 
-        // Antialiasing is deliberately off: multisampling this SubScene cost more
-        // than a whole frame budget on modest GPUs, and a stalled frame used to
-        // starve the control loop's watchdog.
-        SubScene subScene = new SubScene(worldRoot, 1, 1, true, SceneAntialiasing.DISABLED);
+        Group worldRoot = new Group(ambient, sunLight, fillLight,
+                buildSkyDome(), buildSun(), buildGround(),
+                buildWaterAndDock(), vehicle, hookShadow, cargoGroup, cameraRig);
+
+        // Antialiasing is affordable again: the control loop no longer rides on
+        // the render thread, so an expensive frame costs smoothness, never safety.
+        SubScene subScene = new SubScene(worldRoot, 1, 1, true, SceneAntialiasing.BALANCED);
         // MUST stay a solid Color. A LinearGradient fill here silently skips the
         // SubScene's per-frame buffer clear, so moving geometry (boom, hook,
         // shadows) smears into swept fans of stale pixels. The sky gradient is
@@ -287,10 +338,56 @@ public final class Crane3DView implements CraneSceneView {
         cargoGroup.getChildren().setAll(buildCargoNode(wanted));
         cargoGroup.setVisible(wanted != CargoType.NONE);
         cargoAttached = true;
+        cargoOnVehicle = false;
+        cargoFallSpeed = 0;
     }
 
     public CargoType cargo() {
         return cargoType;
+    }
+
+    /**
+     * Driver mode: the operator leaves the crane and drives the truck. The crane
+     * itself is locked out by the UI (all axis demands forced to zero) — this
+     * flag only governs whether the truck responds to the driving controls.
+     */
+    public void setDriverMode(boolean enabled) {
+        driverMode = enabled;
+        if (!enabled) {
+            driveThrottle = 0;
+            driveSteer = 0;
+        }
+    }
+
+    public boolean isDriverMode() {
+        return driverMode;
+    }
+
+    /** Driving controls, both in [-1, +1]. Ignored unless driver mode is on. */
+    public void setDriveInput(double throttle, double steer) {
+        driveThrottle = Math.clamp(throttle, -1, 1);
+        driveSteer = Math.clamp(steer, -1, 1);
+    }
+
+    /** Speed over ground in km/h, for the UI readout. */
+    public double truckSpeedKmh() {
+        return truckSpeed * 3.6;
+    }
+
+    /**
+     * Unhooks the load where it hangs — what the ground crew does when the load
+     * is in place. It drops to whatever is under it (the bed or the ground).
+     */
+    public void releaseCargo() {
+        if (cargoType != CargoType.NONE && cargoAttached) {
+            cargoAttached = false;
+            cargoFallSpeed = 0;
+        }
+    }
+
+    /** True while the load hangs on the hook (so the UI can label its button). */
+    public boolean isCargoAttached() {
+        return cargoType != CargoType.NONE && cargoAttached;
     }
 
     // ---- per-frame update ----
@@ -334,9 +431,11 @@ public final class Crane3DView implements CraneSceneView {
         hookBlock.setTranslateY(ropeLength + HOOK_BLOCK_HEIGHT / 2);
         hookTip.setTranslateY(ropeLength + HOOK_BLOCK_HEIGHT + 0.08);
 
-        Point3D hookWorld = hookWorldPosition(jibTip, ropeLength, swayDeg, slewDeg);
+        driveTruck(dt);
+        Point3D hookWorld = vehicleToWorld(
+                hookVehiclePosition(jibTip, ropeLength, swayDeg, slewDeg));
         updateHookShadow(hookWorld);
-        updateCargo(hookWorld, slewDeg);
+        updateCargo(dt, hookWorld, slewDeg);
         updateCamera(dt, hookWorld, slewDeg);
         bobBoat();
 
@@ -373,14 +472,87 @@ public final class Crane3DView implements CraneSceneView {
         return tip.add(along * c + perp * s, -along * s + perp * c, 0);
     }
 
-    /** World position of the hook block, including sway deflection and slew. */
-    private static Point3D hookWorldPosition(Point3D jibTip, double ropeLength,
-                                             double swayDeg, double slewDeg) {
+    /**
+     * Hook-block position in <b>vehicle-local</b> coordinates, including sway
+     * deflection and slew. {@link #vehicleToWorld} lifts it into the world once
+     * the truck's own pose is applied.
+     */
+    private static Point3D hookVehiclePosition(Point3D jibTip, double ropeLength,
+                                               double swayDeg, double slewDeg) {
         double sway = Math.toRadians(swayDeg);
         double localX = jibTip.getX() + ropeLength * Math.sin(sway);
         double localY = jibTip.getY() + ropeLength * Math.cos(sway) + HOOK_BLOCK_HEIGHT;
         double slew = Math.toRadians(slewDeg);
         return new Point3D(localX * Math.cos(slew), localY - BED_HEIGHT, -localX * Math.sin(slew));
+    }
+
+    // ---- vehicle frame ↔ world frame ----
+
+    private Point3D vehicleToWorld(Point3D local) {
+        double heading = Math.toRadians(truckHeadingDeg);
+        double cos = Math.cos(heading);
+        double sin = Math.sin(heading);
+        // Rotate(headingDeg, Y_AXIS): (x, z) → (x·cos + z·sin, −x·sin + z·cos)
+        return new Point3D(
+                truckX + local.getX() * cos + local.getZ() * sin,
+                local.getY(),
+                truckZ - local.getX() * sin + local.getZ() * cos);
+    }
+
+    private Point3D worldToVehicle(Point3D world) {
+        double heading = Math.toRadians(truckHeadingDeg);
+        double cos = Math.cos(heading);
+        double sin = Math.sin(heading);
+        double dx = world.getX() - truckX;
+        double dz = world.getZ() - truckZ;
+        return new Point3D(dx * cos - dz * sin, world.getY(), dx * sin + dz * cos);
+    }
+
+    /**
+     * Simple bicycle-style truck motion: throttle accelerates, releasing it
+     * coasts down through rolling drag, and steering only bites while rolling —
+     * a stationary truck cannot pivot on the spot.
+     */
+    private void driveTruck(double dt) {
+        if (driverMode) {
+            if (driveThrottle >= 0) {
+                truckSpeed += driveThrottle * ACCELERATION * dt;
+            } else if (truckSpeed > 0.1) {
+                truckSpeed -= BRAKE_DECELERATION * dt;          // brake first
+            } else {
+                truckSpeed += driveThrottle * ACCELERATION * 0.6 * dt; // then reverse
+            }
+            truckSpeed -= truckSpeed * ROLLING_DRAG * dt;
+            truckSpeed = Math.clamp(truckSpeed, -MAX_SPEED * 0.4, MAX_SPEED);
+
+            double speedFactor = Math.clamp(truckSpeed / MAX_SPEED, -1, 1);
+            truckHeadingDeg += driveSteer * STEER_RATE * speedFactor * dt;
+        } else {
+            truckSpeed -= truckSpeed * (ROLLING_DRAG + 1.5) * dt; // roll to a stop
+            if (Math.abs(truckSpeed) < 0.02) {
+                truckSpeed = 0;
+            }
+        }
+        if (truckSpeed == 0) {
+            applyVehiclePose();
+            return;
+        }
+
+        double heading = Math.toRadians(truckHeadingDeg);
+        // Local -X is the cab's forward direction.
+        truckX -= truckSpeed * dt * Math.cos(heading);
+        truckZ += truckSpeed * dt * Math.sin(heading);
+
+        // Keep it on the apron: the quay edge is a hard stop, not a ramp.
+        truckX = Math.clamp(truckX, -APRON_LIMIT_X, APRON_LIMIT_X);
+        truckZ = Math.clamp(truckZ, -APRON_LIMIT_Z, DOCK_EDGE_Z - 4.0);
+        applyVehiclePose();
+    }
+
+    private void applyVehiclePose() {
+        vehicleTranslate.setX(truckX);
+        vehicleTranslate.setZ(truckZ);
+        vehicleRotate.setAngle(truckHeadingDeg);
     }
 
     // ---- shadows ----
@@ -398,33 +570,115 @@ public final class Crane3DView implements CraneSceneView {
     // ---- cargo ----
 
     /**
-     * Cargo state machine: while attached the load hangs below the hook (sway
-     * included). Touching the ground detaches it and it stays put; bringing the
-     * hook back down to it picks it up again.
+     * Cargo state machine with real surfaces underneath it.
+     *
+     * <p>While hooked, the load hangs below the hook (sway included) but is never
+     * allowed to sink into whatever is beneath it — the truck bed or the ground —
+     * and is pushed clear of the mast, so it no longer passes through the crane.
+     * Released (or set down), it falls under gravity onto that surface. A load
+     * resting on the bed is stored in vehicle coordinates, so it rides along when
+     * the truck is driven; on the ground it stays in world coordinates.
      */
-    private void updateCargo(Point3D hookWorld, double slewDeg) {
+    private void updateCargo(double dt, Point3D hookWorld, double slewDeg) {
         if (cargoType == CargoType.NONE) {
             return;
         }
         double halfHeight = cargoType.height() / 2;
+
         if (cargoAttached) {
-            cargoX = hookWorld.getX();
-            cargoZ = hookWorld.getZ();
-            cargoY = hookWorld.getY() + 0.12 + halfHeight;
-            if (cargoY + halfHeight >= 0) {      // Y down: >= 0 is at/below ground
-                cargoY = -halfHeight;
+            Point3D hanging = new Point3D(
+                    hookWorld.getX(), hookWorld.getY() + 0.12 + halfHeight, hookWorld.getZ());
+            hanging = pushClearOfMast(hanging);
+
+            double support = supportHeight(hanging.getX(), hanging.getZ());
+            double resting = support - halfHeight;
+            if (hanging.getY() >= resting) {          // Y down: touched down
+                setCargoRest(hanging.getX(), resting, hanging.getZ());
                 cargoAttached = false;
+                cargoFallSpeed = 0;
+            } else {
+                cargoOnVehicle = false;
+                cargoX = hanging.getX();
+                cargoY = hanging.getY();
+                cargoZ = hanging.getZ();
             }
-            cargoRotate.setAngle(slewDeg);
+            cargoRotate.setAngle(truckHeadingDeg + slewDeg);
         } else {
-            Point3D top = new Point3D(cargoX, cargoY - halfHeight, cargoZ);
-            if (hookWorld.distance(top) < 0.7) {
+            Point3D world = restingWorldPosition();
+            double support = supportHeight(world.getX(), world.getZ());
+            double resting = support - halfHeight;
+
+            if (world.getY() < resting - 1e-4) {      // still falling
+                cargoFallSpeed += GRAVITY * dt;
+                double y = Math.min(world.getY() + cargoFallSpeed * dt, resting);
+                setCargoRest(world.getX(), y, world.getZ());
+                if (y >= resting - 1e-4) {
+                    cargoFallSpeed = 0;
+                }
+            } else if (world.getY() > resting) {      // support drove away underneath
+                setCargoRest(world.getX(), resting, world.getZ());
+            }
+
+            Point3D top = new Point3D(world.getX(), world.getY() - halfHeight, world.getZ());
+            if (cargoFallSpeed == 0 && hookWorld.distance(top) < 0.7) {
                 cargoAttached = true;
             }
         }
-        cargoTranslate.setX(cargoX);
-        cargoTranslate.setY(cargoY);
-        cargoTranslate.setZ(cargoZ);
+
+        Point3D drawAt = cargoAttached
+                ? new Point3D(cargoX, cargoY, cargoZ)
+                : restingWorldPosition();
+        cargoTranslate.setX(drawAt.getX());
+        cargoTranslate.setY(drawAt.getY());
+        cargoTranslate.setZ(drawAt.getZ());
+    }
+
+    /** Stores a resting position, choosing the frame that carries the load. */
+    private void setCargoRest(double worldX, double worldY, double worldZ) {
+        Point3D local = worldToVehicle(new Point3D(worldX, worldY, worldZ));
+        cargoOnVehicle = isOverBed(local.getX(), local.getZ());
+        if (cargoOnVehicle) {
+            cargoX = local.getX();
+            cargoZ = local.getZ();
+        } else {
+            cargoX = worldX;
+            cargoZ = worldZ;
+        }
+        cargoY = worldY;
+    }
+
+    private Point3D restingWorldPosition() {
+        return cargoOnVehicle
+                ? vehicleToWorld(new Point3D(cargoX, cargoY, cargoZ))
+                : new Point3D(cargoX, cargoY, cargoZ);
+    }
+
+    /** Height (world Y) of the surface under a point: the truck bed, or the ground. */
+    private double supportHeight(double worldX, double worldZ) {
+        Point3D local = worldToVehicle(new Point3D(worldX, 0, worldZ));
+        return isOverBed(local.getX(), local.getZ()) ? -BED_HEIGHT : 0.0;
+    }
+
+    private static boolean isOverBed(double localX, double localZ) {
+        return localX > BED_FRONT_X && localX < BED_REAR_X
+                && Math.abs(localZ) < BED_HALF_WIDTH;
+    }
+
+    /**
+     * Keeps a hanging load out of the mast: inside the keep-out cylinder it is
+     * nudged radially outwards, which is what a banksman would do with a tag line.
+     */
+    private Point3D pushClearOfMast(Point3D world) {
+        Point3D local = worldToVehicle(world);
+        double radius = Math.hypot(local.getX(), local.getZ());
+        double clearance = MAST_KEEP_OUT_RADIUS + cargoType.length() / 2;
+        if (radius >= clearance || local.getY() > -0.2) {
+            return world;   // clear of the mast, or already below the deck line
+        }
+        double scale = radius < 1e-3 ? 1 : clearance / radius;
+        double pushedX = radius < 1e-3 ? clearance : local.getX() * scale;
+        double pushedZ = radius < 1e-3 ? 0 : local.getZ() * scale;
+        return vehicleToWorld(new Point3D(pushedX, local.getY(), pushedZ));
     }
 
     // ---- camera ----
@@ -444,8 +698,12 @@ public final class Crane3DView implements CraneSceneView {
 
         switch (cameraMode) {
             case CAB -> {
-                centre = hookWorld;
-                double[] rig = rigFromEye(centre, CAB_EYE);
+                // In driver mode there is no load to watch — look up the road.
+                Point3D eye = vehicleToWorld(CAB_EYE);
+                centre = driverMode
+                        ? vehicleToWorld(new Point3D(CAB_CENTRE_X - 18, -2.2, 0))
+                        : hookWorld;
+                double[] rig = rigFromEye(centre, eye);
                 azimuth = rig[0];
                 elevation = rig[1];
                 distance = Math.max(rig[2], 4.0);
@@ -471,7 +729,8 @@ public final class Crane3DView implements CraneSceneView {
                 distance = rig[2];
             }
             default -> {
-                centre = ORBIT_CENTRE;
+                // Orbit the vehicle, so driving does not leave the camera behind.
+                centre = vehicleToWorld(ORBIT_CENTRE);
                 azimuth = orbitAzimuth;
                 elevation = orbitElevation;
                 distance = orbitDistance;
@@ -582,7 +841,7 @@ public final class Crane3DView implements CraneSceneView {
         // water takes over from there, so no ground ever covers the harbour.
         double apronDepth = 220;
         Box plane = new Box(260, 0.12, apronDepth);
-        plane.setMaterial(material(GROUND));
+        plane.setMaterial(texturedMaterial(GROUND, 0.26, 7));
         plane.setTranslateY(0.06); // top surface exactly at y = 0
         plane.setTranslateZ(DOCK_EDGE_Z - apronDepth / 2);
         ground.getChildren().add(plane);
@@ -614,7 +873,7 @@ public final class Crane3DView implements CraneSceneView {
         Group harbour = new Group();
 
         Box quay = new Box(90, 0.5, 1.6);
-        quay.setMaterial(material(DOCK_COLOR));
+        quay.setMaterial(texturedMaterial(DOCK_COLOR, 0.4, 13));
         quay.setTranslateY(-0.2);
         quay.setTranslateZ(DOCK_EDGE_Z);
 
@@ -659,11 +918,11 @@ public final class Crane3DView implements CraneSceneView {
         boatBob.setZ(Math.sin(t * 0.6) * 0.04);
     }
 
-    /** Blob shadows that never move: the truck body and the crane pillar. */
-    private static Node buildStaticShadows() {
-        Box truckShadow = new Box(8.2, 0.02, 2.9);
+    /** The truck's own blob shadow; it rides inside the vehicle group. */
+    private static Node buildVehicleShadow() {
+        Box truckShadow = new Box(BED_LENGTH + 2.6, 0.02, 2.9);
         truckShadow.setMaterial(material(SHADOW));
-        truckShadow.setTranslateX(-1.4);
+        truckShadow.setTranslateX(BED_CENTRE_X - 1.0);
         truckShadow.setTranslateY(-0.03);
 
         Group pillarShadow = buildBlobShadow(0.9);
@@ -677,48 +936,91 @@ public final class Crane3DView implements CraneSceneView {
         return new Group(blob);
     }
 
-    /** Flatbed truck: chassis, cab with windows, wheels with rims. */
+    /**
+     * Flatbed truck laid out around the crane: the cab sits ahead of the mast
+     * (negative X) and the load bed runs behind it, so the crane can pick a load
+     * off the ground and set it down on its own deck.
+     */
     private static Node buildTruck() {
         PhongMaterial body = material(TRUCK_FILL);
         PhongMaterial dark = material(TRUCK_DARK);
         PhongMaterial glass = material(GLASS);
         PhongMaterial rim = material(RIM);
+        PhongMaterial deckMaterial = texturedMaterial(BED_DECK, 0.45, 31);   // planked deck
         Group truck = new Group();
 
-        Box bed = new Box(7.0, 0.55, 2.4);
-        bed.setMaterial(body);
-        bed.setTranslateX(-0.7);
+        Box bed = new Box(BED_LENGTH, 0.55, BED_HALF_WIDTH * 2);
+        bed.setMaterial(deckMaterial);
+        bed.setTranslateX(BED_CENTRE_X);
         bed.setTranslateY(-(BED_HEIGHT - 0.55 / 2));
 
-        Box chassis = new Box(8.4, 0.22, 1.1);   // rail under the bed
+        // Side rails, so the deck reads as a load platform rather than a slab.
+        for (double railZ : new double[]{-BED_HALF_WIDTH, BED_HALF_WIDTH}) {
+            Box rail = new Box(BED_LENGTH, 0.26, 0.1);
+            rail.setMaterial(dark);
+            rail.setTranslateX(BED_CENTRE_X);
+            rail.setTranslateY(-(BED_HEIGHT + 0.13));
+            rail.setTranslateZ(railZ);
+            truck.getChildren().add(rail);
+        }
+        Box headboard = new Box(0.12, 0.9, BED_HALF_WIDTH * 2);
+        headboard.setMaterial(dark);
+        headboard.setTranslateX(BED_REAR_X);
+        headboard.setTranslateY(-(BED_HEIGHT + 0.45));
+
+        Box chassis = new Box(BED_LENGTH + 2.8, 0.22, 1.1);
         chassis.setMaterial(dark);
-        chassis.setTranslateX(-1.2);
+        chassis.setTranslateX(BED_CENTRE_X - 1.1);
         chassis.setTranslateY(-0.72);
 
-        Box cab = new Box(1.5, 1.75, 2.4);
+        Box cab = new Box(CAB_LENGTH, 1.75, 2.4);
         cab.setMaterial(body);
-        cab.setTranslateX(-4.95);
+        cab.setTranslateX(CAB_CENTRE_X);
         cab.setTranslateY(-(0.55 + 1.75 / 2));
 
         Box windscreen = new Box(0.08, 0.72, 2.1);
         windscreen.setMaterial(glass);
-        windscreen.setTranslateX(-5.72);
+        windscreen.setTranslateX(CAB_CENTRE_X - CAB_LENGTH / 2 - 0.02);
         windscreen.setTranslateY(-1.85);
-        Box sideWindowLeft = new Box(1.0, 0.6, 0.08);
-        sideWindowLeft.setMaterial(glass);
-        sideWindowLeft.setTranslateX(-4.95);
-        sideWindowLeft.setTranslateY(-1.85);
-        sideWindowLeft.setTranslateZ(-1.21);
-        Box sideWindowRight = new Box(1.0, 0.6, 0.08);
-        sideWindowRight.setMaterial(glass);
-        sideWindowRight.setTranslateX(-4.95);
-        sideWindowRight.setTranslateY(-1.85);
-        sideWindowRight.setTranslateZ(1.21);
+        for (double windowZ : new double[]{-1.21, 1.21}) {
+            Box sideWindow = new Box(1.0, 0.6, 0.08);
+            sideWindow.setMaterial(glass);
+            sideWindow.setTranslateX(CAB_CENTRE_X);
+            sideWindow.setTranslateY(-1.85);
+            sideWindow.setTranslateZ(windowZ);
+            truck.getChildren().add(sideWindow);
+        }
 
-        truck.getChildren().addAll(chassis, bed, cab, windscreen,
-                sideWindowLeft, sideWindowRight);
+        // Exhaust stack and a roof beacon: small details, big "vehicle" cue.
+        Cylinder exhaust = new Cylinder(0.09, 1.6);
+        exhaust.setMaterial(material(CHROME));
+        exhaust.setTranslateX(CAB_CENTRE_X + CAB_LENGTH / 2 + 0.12);
+        exhaust.setTranslateY(-1.4);
+        exhaust.setTranslateZ(-1.05);
+        Sphere beacon = new Sphere(0.14);
+        beacon.setMaterial(material(Color.web("#e8a020")));
+        beacon.setTranslateX(CAB_CENTRE_X);
+        beacon.setTranslateY(-2.4);
 
-        for (double wheelX : new double[]{-4.9, -3.3, 0.9, 2.1}) {
+        truck.getChildren().addAll(chassis, bed, headboard, cab, windscreen, exhaust, beacon);
+
+        // Outriggers: the legs a loader crane drops before lifting.
+        for (double outriggerZ : new double[]{-1.35, 1.35}) {
+            Box leg = new Box(0.36, 0.24, 1.1);
+            leg.setMaterial(material(STEEL));
+            leg.setTranslateX(0.55);
+            leg.setTranslateY(-0.85);
+            leg.setTranslateZ(outriggerZ);
+            Cylinder foot = new Cylinder(0.22, 0.7);
+            foot.setMaterial(material(STEEL));
+            foot.setTranslateX(0.55);
+            foot.setTranslateY(-0.35);
+            foot.setTranslateZ(outriggerZ + Math.signum(outriggerZ) * 0.5);
+            truck.getChildren().addAll(leg, foot);
+        }
+
+        double frontAxleX = CAB_CENTRE_X - 0.35;
+        for (double wheelX : new double[]{frontAxleX, BED_CENTRE_X + 1.0, BED_CENTRE_X + 2.3}) {
             for (double wheelZ : new double[]{-1.05, 1.05}) {
                 Cylinder tyre = new Cylinder(0.55, 0.4);
                 tyre.setMaterial(material(WHEEL));
@@ -802,8 +1104,49 @@ public final class Crane3DView implements CraneSceneView {
     }
 
     private static PhongMaterial material(Color diffuse) {
+        return material(diffuse, 24);
+    }
+
+    /**
+     * @param specularPower higher = tighter, glossier highlight. Painted steel
+     *                      sits around 24, chrome and glass far higher.
+     */
+    private static PhongMaterial material(Color diffuse, double specularPower) {
         PhongMaterial material = new PhongMaterial(diffuse);
-        material.setSpecularColor(Color.rgb(70, 70, 70));
+        material.setSpecularColor(diffuse.deriveColor(0, 0.35, 2.4, 1).brighter());
+        material.setSpecularPower(specularPower);
+        return material;
+    }
+
+    /**
+     * A small tileable noise texture. Flat colours read as plastic; a little
+     * per-pixel variation is what makes the asphalt and the deck look like
+     * materials rather than paint.
+     */
+    private static Image noiseTexture(Color base, double variation, long seed) {
+        int size = 128;
+        WritableImage image = new WritableImage(size, size);
+        PixelWriter pixels = image.getPixelWriter();
+        java.util.Random random = new java.util.Random(seed);
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                double shade = 1 + (random.nextDouble() - 0.5) * variation;
+                pixels.setColor(x, y, Color.color(
+                        Math.clamp(base.getRed() * shade, 0, 1),
+                        Math.clamp(base.getGreen() * shade, 0, 1),
+                        Math.clamp(base.getBlue() * shade, 0, 1)));
+            }
+        }
+        return image;
+    }
+
+    private static PhongMaterial texturedMaterial(Color base, double variation, long seed) {
+        // Diffuse colour MUST stay white: JavaFX multiplies it with the diffuse
+        // map, so tinting both would square the colour and render nearly black.
+        PhongMaterial material = new PhongMaterial(Color.WHITE);
+        material.setDiffuseMap(noiseTexture(base, variation, seed));
+        material.setSpecularColor(Color.rgb(46, 48, 52));
+        material.setSpecularPower(18);
         return material;
     }
 
