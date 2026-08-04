@@ -41,6 +41,35 @@ All types in `com.vukotic.crane.core.model` / `...core.driver`:
 5. Demands clamped to [-1,+1] and slew-rate-limited per axis (`commandRampRate`).
 6. Motion toward a violated position limit is zeroed; motion away from it is allowed.
 
+## Safety invariants at the UI boundary (V3.3)
+The safety layer is only as good as what the UI feeds it. These rules are not
+optional and are covered by tests:
+
+1. **The demo drives the simulator only.** It synthesises operator input including
+   the deadman, so `startDemo()` refuses to run unless the active driver is the
+   simulator. A sales demo must never be able to move a real machine.
+2. **No program clears an E-STOP latch.** Nothing in the codebase may call
+   `requestReset()` on the operator's behalf — a latch is cleared by a person
+   pressing RESET with the controls neutral. The latch is also re-asserted when a
+   profile or driver switch builds a fresh `SafetyController`, so it survives
+   backend replacement.
+3. **Cached input expires.** The window neutralises every held key on focus loss
+   and on minimise, because key releases only reach the focused window. The
+   command thread additionally requires a UI heartbeat newer than 400 ms; if the
+   JavaFX thread stalls, commands go out neutral instead of replaying stale
+   intent with a fresh timestamp.
+4. **Interlocks are `volatile`.** `driverMode` is written on the FX thread and read
+   on the command thread; without it the lockout could be invisible to the sender.
+5. **Elapsed safety time is monotonic.** Command freshness and the watchdog use
+   `MonotonicClock`, never the wall clock, so an NTP step or a manual clock change
+   cannot extend a stale command's validity.
+6. **Serial fails closed.** `SerialCraneDriver` transmits zeros unless telemetry is
+   fresher than 250 ms — before the first `T` line, or after the link goes quiet.
+   Without position feedback the position limits would be guarding fiction.
+7. **Non-finite demands are neutral.** NaN and infinity survive clamping, so the
+   safety layer maps them to zero rather than letting them poison the ramp
+   limiter and everything downstream.
+
 ## Assist pipeline (M4)
 `ControlLoop` applies an optional chain of `DemandFilter`s to the raw demands each tick,
 BEFORE the safety layer — assists shape motion, safety always has the final word:

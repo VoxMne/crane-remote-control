@@ -62,10 +62,19 @@ public final class ControlLoopBackend implements CraneBackend {
         loop.start();
     }
 
-    /** Stops the loop (which zeroes demands) and disconnects the driver. */
+    /**
+     * Stops the loop (which zeroes demands) and disconnects the driver.
+     *
+     * <p>The disconnect runs in a {@code finally}: if the final zero-demand write
+     * fails — exactly what happens when a serial cable has already been pulled —
+     * the port must still be released rather than leaked.
+     */
     public void stop() {
-        loop.stop();
-        driver.disconnect();
+        try {
+            loop.stop();
+        } finally {
+            driver.disconnect();
+        }
     }
 
     /**

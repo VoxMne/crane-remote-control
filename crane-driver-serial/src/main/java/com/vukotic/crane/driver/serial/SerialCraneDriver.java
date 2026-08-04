@@ -36,6 +36,15 @@ public final class SerialCraneDriver implements CraneDriver {
 
     private static final long READ_SLICE_MILLIS = 200;
 
+    /**
+     * Telemetry older than this is treated as no telemetry at all. Matches the
+     * firmware watchdog in docs/PROTOCOL.md, so both ends give up together.
+     */
+    public static final long TELEMETRY_TIMEOUT_MILLIS = 250;
+
+    private final java.util.concurrent.atomic.AtomicBoolean telemetryLost =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
     private final SerialLink link;
     private final String label;
 
@@ -118,10 +127,38 @@ public final class SerialCraneDriver implements CraneDriver {
         return profile != null && link.isOpen();
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p><b>Fails closed.</b> Nonzero demands are only transmitted while fresh
+     * telemetry is arriving. Before the first {@code T} line, or once telemetry
+     * is older than {@value #TELEMETRY_TIMEOUT_MILLIS} ms, zeros go out instead:
+     * without position feedback the host cannot know where the crane is, so the
+     * safety layer's position limits would be operating on fiction. A one-way
+     * link must not be able to keep a machine moving.
+     */
     @Override
     public void sendDemands(Map<String, Double> axisDemands) {
         requireConnected();
-        link.writeLine(CspCodec.encodeDemands(sequence.getAndIncrement(), axisDemands));
+        Map<String, Double> outgoing = axisDemands;
+        if (!isTelemetryFresh()) {
+            outgoing = new LinkedHashMap<>();
+            for (String axisId : axisDemands.keySet()) {
+                outgoing.put(axisId, 0.0);
+            }
+            if (telemetryLost.compareAndSet(false, true)) {
+                System.err.println("[serial] telemetry stale on " + label
+                        + " — holding demands at zero");
+            }
+        } else {
+            telemetryLost.set(false);
+        }
+        link.writeLine(CspCodec.encodeDemands(sequence.getAndIncrement(), outgoing));
+    }
+
+    /** True while position feedback is recent enough to command motion against. */
+    public boolean isTelemetryFresh() {
+        return millisSinceLastTelemetry() <= TELEMETRY_TIMEOUT_MILLIS;
     }
 
     @Override

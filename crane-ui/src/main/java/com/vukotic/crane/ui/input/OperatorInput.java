@@ -58,6 +58,18 @@ public final class OperatorInput {
         pressedKeys.remove(keyName);
     }
 
+    /**
+     * Drops every held key, including the deadman.
+     *
+     * <p>Called whenever the window stops receiving input — losing focus, being
+     * minimised, closing. Key releases are delivered only to the focused window,
+     * so without this a held deadman would stay "held" forever after the operator
+     * alt-tabs away, and the crane would keep running on cached intent.
+     */
+    public void releaseAllKeys() {
+        pressedKeys.clear();
+    }
+
     /** E-STOP request state, driven by the latching on-screen button (and ESC). */
     public void setEstopRequested(boolean requested) {
         this.estopRequested = requested;

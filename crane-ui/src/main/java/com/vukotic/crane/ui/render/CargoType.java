@@ -5,10 +5,8 @@ package com.vukotic.crane.ui.render;
  * mass and does not affect the simulation — it hangs, can be set down on the
  * ground and picked back up.
  *
- * @param label      name shown in the UI selector
- * @param length     X extent in metres (0 for {@link #NONE})
- * @param height     Y extent in metres
- * @param width      Z extent in metres
+ * <p>Each constant carries its label plus its extent in metres along X (length),
+ * Y (height) and Z (width); {@link #NONE} is zero-sized.
  */
 public enum CargoType {
 

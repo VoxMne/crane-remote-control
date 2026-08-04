@@ -129,8 +129,11 @@ public final class SafetyController {
         for (AxisSpec axis : profile.axes()) {
             String id = axis.id();
 
-            // Rule 5 — clamp the raw demand to [-1, +1].
-            double raw = Math.clamp(command.demand(id), -1.0, 1.0);
+            // Rule 5 — clamp the raw demand to [-1, +1]. A non-finite demand is
+            // treated as neutral: NaN survives comparisons and clamping and would
+            // otherwise poison the ramp limiter and the driver downstream.
+            double requested = command.demand(id);
+            double raw = Double.isFinite(requested) ? Math.clamp(requested, -1.0, 1.0) : 0.0;
 
             // Rules 3 + 4 — deadman released (or watchdog tripped): target neutral,
             // reached through the ramp limiter below = a fast controlled stop.

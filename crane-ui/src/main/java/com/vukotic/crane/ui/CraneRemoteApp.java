@@ -3,6 +3,7 @@ package com.vukotic.crane.ui;
 import com.vukotic.crane.core.model.AxisSpec;
 import com.vukotic.crane.core.model.CraneCommand;
 import com.vukotic.crane.core.model.CraneProfile;
+import com.vukotic.crane.core.MonotonicClock;
 import com.vukotic.crane.core.assist.AutoSequencer;
 import com.vukotic.crane.core.driver.CraneDriver;
 import com.vukotic.crane.core.model.CraneState;
@@ -108,9 +109,32 @@ public final class CraneRemoteApp extends Application {
 
     /** Fixed-rate operator-command thread — see startCommandThread(). */
     private static final long COMMAND_PERIOD_MILLIS = 20; // 50 Hz
+    /**
+     * How long the UI may go silent before the command thread stops trusting the
+     * cached operator input. Generous enough for a slow frame, short enough that
+     * a frozen UI cannot keep a crane moving.
+     */
+    private static final long UI_HEARTBEAT_TIMEOUT_MILLIS = 400;
     private Thread commandThread;
     private volatile boolean commandThreadRunning;
     private volatile CraneCommand lastCommand;
+    /** Stamped by the JavaFX frame loop; proves the UI is still running. */
+    private volatile long uiHeartbeatMillis = MonotonicClock.millis();
+
+    private boolean isUiAlive() {
+        return MonotonicClock.millis() - uiHeartbeatMillis < UI_HEARTBEAT_TIMEOUT_MILLIS;
+    }
+
+    /**
+     * The operator's safety flags with every axis demand zeroed. Used for the
+     * driver-mode lockout and for failing closed when the UI goes quiet.
+     */
+    private static CraneCommand neutralWithFlags(CraneProfile profile, CraneCommand command,
+                                                 boolean deadmanHeld) {
+        return new CraneCommand(command.timestampMillis(),
+                CraneCommand.neutral(profile).axisDemands(),
+                deadmanHeld, command.estopRequested(), command.resetRequested());
+    }
 
     private final Map<String, Label> demandReadouts = new HashMap<>();
     private final Map<String, Label> positionReadouts = new HashMap<>();
@@ -146,7 +170,9 @@ public final class CraneRemoteApp extends Application {
     private Label windInfo;
 
     // Driver mode: crane locked out, truck drivable with the arrow keys.
-    private boolean driverMode;
+    // Volatile: set on the JavaFX thread, read by the command thread — a hard
+    // interlock must never be invisible to the thread that sends the commands.
+    private volatile boolean driverMode;
     private ToggleButton driverModeButton;
     private Label driverInfo;
     private Button releaseButton;
@@ -204,6 +230,21 @@ public final class CraneRemoteApp extends Application {
         stage.setTitle("Crane Remote Control" + (version == null ? " (dev)" : " " + version));
         stage.setMinWidth(1060);
         stage.setMinHeight(680);
+        // Losing focus means we will never see the matching key releases, so treat
+        // it as the operator letting go of everything.
+        stage.focusedProperty().addListener((obs, was, focused) -> {
+            if (!focused) {
+                operatorInput.releaseAllKeys();
+                drivingKeys.clear();
+            }
+        });
+        stage.iconifiedProperty().addListener((obs, was, iconified) -> {
+            if (iconified) {
+                operatorInput.releaseAllKeys();
+                drivingKeys.clear();
+            }
+        });
+
         stage.setScene(scene);
         stage.show();
 
@@ -221,6 +262,7 @@ public final class CraneRemoteApp extends Application {
         frameTimer = new AnimationTimer() {
             @Override
             public void handle(long frameNanos) {
+                uiHeartbeatMillis = MonotonicClock.millis();   // "the UI is alive"
                 CraneCommand command = lastCommand;
                 CraneState state = backend.latestState();
                 if (command == null) {
@@ -256,14 +298,19 @@ public final class CraneRemoteApp extends Application {
                     ControlLoopBackend activeBackend = backend;
                     CraneProfile activeProfile = profile;
                     if (input != null && activeBackend != null && activeProfile != null) {
-                        CraneCommand command = input.snapshot(System.currentTimeMillis());
-                        if (driverMode) {
+                        CraneCommand command = input.snapshot(MonotonicClock.millis());
+
+                        // Fail closed if the UI thread stops proving it is alive.
+                        // Without this the cached key state would keep producing
+                        // freshly-timestamped commands after a UI freeze or a lost
+                        // key-release, and the watchdog would never notice.
+                        if (!isUiAlive()) {
+                            command = neutralWithFlags(activeProfile, command, false);
+                        } else if (driverMode) {
                             // Crane lockout: the driver is in the cab, not on the
                             // remote. Safety flags still pass through untouched.
-                            command = new CraneCommand(command.timestampMillis(),
-                                    CraneCommand.neutral(activeProfile).axisDemands(),
-                                    command.deadmanHeld(), command.estopRequested(),
-                                    command.resetRequested());
+                            command = neutralWithFlags(activeProfile, command,
+                                    command.deadmanHeld());
                         } else if (foldSequencer.isActive()) {
                             command = foldSequencer.next(activeBackend.latestState(), command);
                         }
@@ -325,6 +372,12 @@ public final class CraneRemoteApp extends Application {
 
         profile = newProfile;
         operatorInput = new OperatorInput(keyBindings, profile.axisIds());
+        // A latched emergency stop belongs to the operator, not to a backend
+        // instance. Swapping profile or driver builds a fresh SafetyController,
+        // so the latch is re-asserted here or it would silently disappear.
+        if (estopButton != null && estopButton.isSelected()) {
+            operatorInput.setEstopRequested(true);
+        }
         foldSequencer.cancel(); // never carry an auto-sequence across cranes
 
         backend = new ControlLoopBackend(profile, createSelectedDriver());
@@ -538,6 +591,15 @@ public final class CraneRemoteApp extends Application {
         if (demoRunning) {
             return;
         }
+        // HARD RULE: the demo synthesises operator input, including the deadman.
+        // It may only ever drive the simulator. Autonomous motion of a real
+        // machine from a sales demo is not a feature, it is an accident.
+        if (simulator == null) {
+            recordEvent("Demo refused: it runs on the simulator only, not on "
+                    + driverChoice);
+            demoButton.setSelected(false);
+            return;
+        }
         dismissWelcome();
         demoRunning = true;
         demoButton.setSelected(true);
@@ -599,14 +661,17 @@ public final class CraneRemoteApp extends Application {
             demoTimeline = null;
         }
         demoRunning = false;
-        for (String key : List.of("SPACE", "W", "T", "Q")) {
-            operatorInput.keyReleased(key);
-        }
+        operatorInput.releaseAllKeys();
         drivingKeys.clear();
         driverModeButton.setSelected(false);
-        estopButton.setSelected(false);
-        operatorInput.requestReset();
-        demoCaption.setVisible(false);
+        // The latch is NOT cleared here. An emergency stop stays latched until a
+        // person presses RESET with the controls at neutral — a program must
+        // never clear it on the operator's behalf, demo or not.
+        if (estopButton.isSelected()) {
+            showCaption("Emergency stop is still latched — press RESET to clear it.");
+        } else {
+            demoCaption.setVisible(false);
+        }
         demoButton.setSelected(false);
         demoButton.setText(">  RUN DEMO");
     }
@@ -1304,6 +1369,10 @@ public final class CraneRemoteApp extends Application {
             if (event.getCode() == KeyCode.F11) {
                 stage.setFullScreen(!stage.isFullScreen());
                 event.consume();
+                return;
+            }
+            if (welcomeOverlay != null) {
+                event.consume();   // no hidden motion behind the welcome card
                 return;
             }
             if (isDrivingKey(event.getCode())) {

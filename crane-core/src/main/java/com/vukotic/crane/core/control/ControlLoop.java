@@ -175,7 +175,8 @@ public final class ControlLoop {
                     ? 1.0 / tickHz
                     : Math.clamp((nowNanos - lastTickNanos) / 1_000_000_000.0, 0.0, MAX_DT_SECONDS);
             lastTickNanos = nowNanos;
-            tick(System.currentTimeMillis(), dtSeconds);
+            // Monotonic: command freshness must not depend on the wall clock.
+            tick(com.vukotic.crane.core.MonotonicClock.millis(), dtSeconds);
         } catch (Throwable t) {
             // Never let one bad tick kill the scheduled task (scheduleAtFixedRate
             // stops silently on an uncaught exception).

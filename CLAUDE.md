@@ -16,6 +16,11 @@ interface; v1 ships a simulator. Product vision: docs/VISION.md. Design: docs/AR
 - `crane-ui` — JavaFX HMI. Depends on crane-core + crane-sim.
 
 ## Hard rules (safety semantics are non-negotiable)
+- NEVER call `requestReset()` programmatically — only a human clears an E-STOP latch.
+- The guided demo may drive the simulator only, never a real driver.
+- Elapsed safety time comes from `MonotonicClock`, never `System.currentTimeMillis()`.
+- A driver with no fresh position feedback must send zero demands.
+- See docs/ARCHITECTURE.md "Safety invariants at the UI boundary" for the full list.
 - E-STOP latches: once tripped, all motion demands are forced to 0 and stay 0 until an
   explicit reset while all controls are neutral.
 - Deadman released ⇒ every axis demand goes to 0 (ramped down fast, not instantly frozen).

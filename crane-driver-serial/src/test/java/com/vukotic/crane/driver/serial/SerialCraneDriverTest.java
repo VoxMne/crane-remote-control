@@ -131,6 +131,10 @@ class SerialCraneDriverTest {
         FakeLink link = linkAnsweringHello(ALL_AXES);
         SerialCraneDriver driver = new SerialCraneDriver(link, "Serial (COM7)");
         driver.connect(profile);
+        // Feedback first: without it the driver fails closed and sends zeros.
+        link.pushToHost(CspCodec.encodeTelemetry(1,
+                Map.of("slew", new CspCodec.AxisTelemetry(0.0, 0.0))));
+        await("telemetry", driver::isTelemetryFresh);
         int before = link.written.size(); // HELLO line(s)
 
         driver.sendDemands(Map.of("slew", 0.5));
@@ -142,6 +146,38 @@ class SerialCraneDriverTest {
         CspCodec.Demands second = CspCodec.parseDemands(demandLines.get(1)).orElseThrow();
         assertEquals(0.5, first.axisDemands().get("slew"));
         assertEquals(first.sequence() + 1, second.sequence());
+        driver.disconnect();
+    }
+
+    @Test
+    void withoutTelemetryTheDriverSendsZerosRatherThanTheRequestedDemand() {
+        FakeLink link = linkAnsweringHello(ALL_AXES);
+        SerialCraneDriver driver = new SerialCraneDriver(link, "Serial (COM7)");
+        driver.connect(profile);          // handshake only: no T line has arrived
+        int before = link.written.size();
+
+        driver.sendDemands(Map.of("slew", 1.0));
+
+        CspCodec.Demands sent = CspCodec.parseDemands(link.written.get(before)).orElseThrow();
+        assertEquals(0.0, sent.axisDemands().get("slew"),
+                "no position feedback means no motion: the host must fail closed");
+        assertFalse(driver.isTelemetryFresh());
+        driver.disconnect();
+    }
+
+    @Test
+    void freshTelemetryRestoresNormalCommanding() {
+        FakeLink link = linkAnsweringHello(ALL_AXES);
+        SerialCraneDriver driver = new SerialCraneDriver(link, "Serial (COM7)");
+        driver.connect(profile);
+        link.pushToHost(CspCodec.encodeTelemetry(1,
+                Map.of("slew", new CspCodec.AxisTelemetry(0.0, 0.0))));
+        await("telemetry", driver::isTelemetryFresh);
+
+        int before = link.written.size();
+        driver.sendDemands(Map.of("slew", 1.0));
+        CspCodec.Demands sent = CspCodec.parseDemands(link.written.get(before)).orElseThrow();
+        assertEquals(1.0, sent.axisDemands().get("slew"));
         driver.disconnect();
     }
 
