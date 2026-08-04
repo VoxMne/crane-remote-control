@@ -214,6 +214,8 @@ public final class CraneRemoteApp extends Application {
                     return;
                 }
                 updateDriving();
+                // Tell the interference guard where any set-down load is standing.
+                backend.setLoadObstacles(view3d.loadObstacles());
                 updateReadouts(command, state);
                 activeView.update(profile, state);
             }
@@ -275,6 +277,9 @@ public final class CraneRemoteApp extends Application {
             }
         }, "operator-command");
         commandThread.setDaemon(true);
+        // The control path outranks the scenery: under load the OS should starve
+        // a frame, never the command stream feeding the safety watchdog.
+        commandThread.setPriority(Thread.MAX_PRIORITY);
         commandThread.start();
     }
 

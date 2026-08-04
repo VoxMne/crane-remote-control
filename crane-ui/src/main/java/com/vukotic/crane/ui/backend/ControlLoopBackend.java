@@ -6,9 +6,14 @@ import com.vukotic.crane.core.model.CraneCommand;
 import com.vukotic.crane.core.model.CraneProfile;
 import com.vukotic.crane.core.model.CraneState;
 import com.vukotic.crane.core.assist.AntiSwayFilter;
+import com.vukotic.crane.core.assist.CollisionGuardFilter;
 import com.vukotic.crane.core.assist.MotionSmoothingFilter;
 import com.vukotic.crane.core.control.DemandFilter;
+import com.vukotic.crane.core.geometry.Aabb;
+import com.vukotic.crane.core.geometry.CraneGeometry;
 import com.vukotic.crane.core.safety.SafetyController;
+
+import java.util.List;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,10 +30,26 @@ public final class ControlLoopBackend implements CraneBackend {
 
     private final CraneDriver driver;
     private final ControlLoop loop;
+    private final CollisionGuardFilter collisionGuard;
 
     public ControlLoopBackend(CraneProfile profile, CraneDriver driver) {
         this.driver = Objects.requireNonNull(driver, "driver");
         this.loop = new ControlLoop(profile, driver, new SafetyController(profile));
+        this.collisionGuard =
+                new CollisionGuardFilter(profile, CraneGeometry.standardLoaderCrane());
+    }
+
+    /**
+     * Tells the collision guard where loads are standing, in the crane frame, so
+     * the arm will not sweep through them.
+     */
+    public void setLoadObstacles(List<Aabb> loads) {
+        collisionGuard.setLoadObstacles(loads);
+    }
+
+    /** True while interference protection is holding an axis back. */
+    public boolean isCollisionBlocking() {
+        return collisionGuard.isBlocking();
     }
 
     /** Shown in the status panel, e.g. "Simulator". */
@@ -60,6 +81,9 @@ public final class ControlLoopBackend implements CraneBackend {
         if (antiSway) {
             chain.add(new AntiSwayFilter());
         }
+        // Interference protection is not optional and runs last, so it vetoes
+        // whatever the assists asked for. The safety layer still follows it.
+        chain.add(collisionGuard);
         loop.setDemandFilters(chain);
     }
 

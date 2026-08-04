@@ -1,10 +1,13 @@
 package com.vukotic.crane.ui.render;
 
+import com.vukotic.crane.core.geometry.Aabb;
+import com.vukotic.crane.core.geometry.Vec3;
 import com.vukotic.crane.core.model.CraneProfile;
 import com.vukotic.crane.core.model.CraneState;
 import javafx.geometry.Point3D;
 import javafx.geometry.Pos;
 import javafx.scene.AmbientLight;
+import javafx.scene.DirectionalLight;
 import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.PerspectiveCamera;
@@ -26,6 +29,8 @@ import javafx.scene.shape.Sphere;
 import javafx.scene.transform.Rotate;
 import javafx.scene.transform.Scale;
 import javafx.scene.transform.Translate;
+
+import java.util.List;
 
 /**
  * JavaFX 3D view of the truck-mounted knuckle-boom crane and its surroundings.
@@ -264,11 +269,11 @@ public final class Crane3DView implements CraneSceneView {
         cameraRig.getTransforms().addAll(camCentre, camAzimuth, camElevation);
 
         // ---- lighting: warm sun key + cool ambient fill ----
-        AmbientLight ambient = new AmbientLight(Color.rgb(126, 132, 142));
-        PointLight sunLight = new PointLight(Color.rgb(255, 246, 222));
-        sunLight.setTranslateX(-42);
-        sunLight.setTranslateY(-58);
-        sunLight.setTranslateZ(-34);
+        AmbientLight ambient = new AmbientLight(Color.rgb(118, 124, 134));
+        // A directional light is the right model for sunlight: parallel rays, so
+        // the far end of the apron is lit exactly like the near end.
+        DirectionalLight sunLight = new DirectionalLight(Color.rgb(255, 246, 222));
+        sunLight.setDirection(new Point3D(0.55, 0.72, 0.42));
         // A dim fill from the opposite side keeps shadowed faces readable
         // instead of going black — the cheap stand-in for bounced light.
         PointLight fillLight = new PointLight(Color.rgb(96, 108, 124));
@@ -388,6 +393,24 @@ public final class Crane3DView implements CraneSceneView {
     /** True while the load hangs on the hook (so the UI can label its button). */
     public boolean isCargoAttached() {
         return cargoType != CargoType.NONE && cargoAttached;
+    }
+
+    /**
+     * A set-down load as a collision box in the crane's own frame (Y up, origin
+     * on the ground under the slew axis) — what the core's interference guard
+     * needs in order to stop the arm sweeping through it. Empty while the load
+     * is on the hook, since the hook carries it out of harm's way.
+     */
+    public List<Aabb> loadObstacles() {
+        if (cargoType == CargoType.NONE || cargoAttached) {
+            return List.of();
+        }
+        Point3D local = worldToVehicle(restingWorldPosition());
+        // Vehicle frame is Y-down with the origin at ground level; the core frame
+        // is Y-up. Only the vertical axis needs flipping.
+        Vec3 centre = new Vec3(local.getX(), -local.getY(), local.getZ());
+        return List.of(Aabb.centred(centre,
+                cargoType.length(), cargoType.height(), cargoType.width()));
     }
 
     // ---- per-frame update ----
@@ -841,7 +864,7 @@ public final class Crane3DView implements CraneSceneView {
         // water takes over from there, so no ground ever covers the harbour.
         double apronDepth = 220;
         Box plane = new Box(260, 0.12, apronDepth);
-        plane.setMaterial(texturedMaterial(GROUND, 0.26, 7));
+        plane.setMaterial(texturedMaterial(GROUND, Surface.SLABS, 7));
         plane.setTranslateY(0.06); // top surface exactly at y = 0
         plane.setTranslateZ(DOCK_EDGE_Z - apronDepth / 2);
         ground.getChildren().add(plane);
@@ -873,7 +896,7 @@ public final class Crane3DView implements CraneSceneView {
         Group harbour = new Group();
 
         Box quay = new Box(90, 0.5, 1.6);
-        quay.setMaterial(texturedMaterial(DOCK_COLOR, 0.4, 13));
+        quay.setMaterial(texturedMaterial(DOCK_COLOR, Surface.SLABS, 13));
         quay.setTranslateY(-0.2);
         quay.setTranslateZ(DOCK_EDGE_Z);
 
@@ -907,8 +930,38 @@ public final class Crane3DView implements CraneSceneView {
                 new Rotate(-96, Rotate.Y_AXIS));
         boat.getTransforms().add(boatBob);
 
-        harbour.getChildren().addAll(quay, water, boat);
+        harbour.getChildren().addAll(quay, water, boat, buildContainerYard());
         return harbour;
+    }
+
+    /**
+     * A few stacked containers along the back of the apron. Pure scenery, but it
+     * gives the eye something to judge distance and scale against — the scene
+     * reads as a working quay instead of an empty plane.
+     */
+    private static Node buildContainerYard() {
+        Group yard = new Group();
+        Color[] palette = {
+                Color.web("#2f7d8c"), Color.web("#8c5a2f"), Color.web("#3f6b3a"),
+                Color.web("#7a3f46"), Color.web("#4a5570")
+        };
+        long seed = 20260804L;
+        java.util.Random random = new java.util.Random(seed);
+        // Well back from the working area, so they read as background and never
+        // crowd the crane.
+        for (int column = 0; column < 8; column++) {
+            double baseX = -26 + column * 7.0;
+            int stackHeight = 1 + random.nextInt(3);
+            for (int level = 0; level < stackHeight; level++) {
+                Box container = new Box(6.0, 2.6, 2.4);
+                container.setMaterial(material(palette[random.nextInt(palette.length)], 16));
+                container.setTranslateX(baseX + random.nextDouble() * 0.4);
+                container.setTranslateY(-(1.3 + level * 2.6));
+                container.setTranslateZ(-24 - random.nextDouble() * 3.0);
+                yard.getChildren().add(container);
+            }
+        }
+        return yard;
     }
 
     /** Gentle vertical bob so the moored boat is not dead still. */
@@ -946,7 +999,7 @@ public final class Crane3DView implements CraneSceneView {
         PhongMaterial dark = material(TRUCK_DARK);
         PhongMaterial glass = material(GLASS);
         PhongMaterial rim = material(RIM);
-        PhongMaterial deckMaterial = texturedMaterial(BED_DECK, 0.45, 31);   // planked deck
+        PhongMaterial deckMaterial = texturedMaterial(BED_DECK, Surface.PLANKS, 31);
         Group truck = new Group();
 
         Box bed = new Box(BED_LENGTH, 0.55, BED_HALF_WIDTH * 2);
@@ -1118,19 +1171,37 @@ public final class Crane3DView implements CraneSceneView {
         return material;
     }
 
+    /** Surface relief patterns the procedural textures can be cut from. */
+    private enum Surface {
+        /** Concrete apron: slab joints on a grid. */
+        SLABS,
+        /** Timber deck: plank seams running along the truck. */
+        PLANKS
+    }
+
+    private static final int TEXTURE_SIZE = 256;
+
     /**
-     * A small tileable noise texture. Flat colours read as plastic; a little
-     * per-pixel variation is what makes the asphalt and the deck look like
-     * materials rather than paint.
+     * Height of the surface relief at a texture pixel, 0 (groove) … 1 (surface).
+     * The same function drives both the diffuse tint and the normal map, so the
+     * shading lines up with the pattern instead of floating over it.
      */
-    private static Image noiseTexture(Color base, double variation, long seed) {
-        int size = 128;
-        WritableImage image = new WritableImage(size, size);
+    private static double relief(Surface surface, int x, int y, java.util.Random random) {
+        double grain = 1 - random.nextDouble() * 0.10;
+        return switch (surface) {
+            case SLABS -> (x % 64 < 2 || y % 64 < 2) ? 0.45 : grain;
+            case PLANKS -> (y % 26 < 2) ? 0.40 : grain;
+        };
+    }
+
+    /** Diffuse map: the base colour darkened into the grooves. */
+    private static Image diffuseTexture(Color base, Surface surface, long seed) {
+        WritableImage image = new WritableImage(TEXTURE_SIZE, TEXTURE_SIZE);
         PixelWriter pixels = image.getPixelWriter();
         java.util.Random random = new java.util.Random(seed);
-        for (int y = 0; y < size; y++) {
-            for (int x = 0; x < size; x++) {
-                double shade = 1 + (random.nextDouble() - 0.5) * variation;
+        for (int y = 0; y < TEXTURE_SIZE; y++) {
+            for (int x = 0; x < TEXTURE_SIZE; x++) {
+                double shade = 0.55 + 0.45 * relief(surface, x, y, random);
                 pixels.setColor(x, y, Color.color(
                         Math.clamp(base.getRed() * shade, 0, 1),
                         Math.clamp(base.getGreen() * shade, 0, 1),
@@ -1140,13 +1211,48 @@ public final class Crane3DView implements CraneSceneView {
         return image;
     }
 
-    private static PhongMaterial texturedMaterial(Color base, double variation, long seed) {
+    /**
+     * Normal map derived from the same relief: slopes are encoded as an RGB
+     * normal, which is what {@link PhongMaterial#setBumpMap} expects. This is
+     * what makes joints and plank seams catch the light instead of looking
+     * painted on.
+     */
+    private static Image normalMap(Surface surface, long seed) {
+        double[][] height = new double[TEXTURE_SIZE][TEXTURE_SIZE];
+        java.util.Random random = new java.util.Random(seed);
+        for (int y = 0; y < TEXTURE_SIZE; y++) {
+            for (int x = 0; x < TEXTURE_SIZE; x++) {
+                height[y][x] = relief(surface, x, y, random);
+            }
+        }
+
+        WritableImage image = new WritableImage(TEXTURE_SIZE, TEXTURE_SIZE);
+        PixelWriter pixels = image.getPixelWriter();
+        double strength = 2.5;
+        for (int y = 0; y < TEXTURE_SIZE; y++) {
+            for (int x = 0; x < TEXTURE_SIZE; x++) {
+                double dx = height[y][(x + 1) % TEXTURE_SIZE] - height[y][(x + TEXTURE_SIZE - 1) % TEXTURE_SIZE];
+                double dy = height[(y + 1) % TEXTURE_SIZE][x] - height[(y + TEXTURE_SIZE - 1) % TEXTURE_SIZE][x];
+                double nx = -dx * strength;
+                double ny = -dy * strength;
+                double length = Math.sqrt(nx * nx + ny * ny + 1);
+                pixels.setColor(x, y, Color.color(
+                        Math.clamp(0.5 + 0.5 * nx / length, 0, 1),
+                        Math.clamp(0.5 + 0.5 * ny / length, 0, 1),
+                        Math.clamp(0.5 + 0.5 / length, 0, 1)));
+            }
+        }
+        return image;
+    }
+
+    private static PhongMaterial texturedMaterial(Color base, Surface surface, long seed) {
         // Diffuse colour MUST stay white: JavaFX multiplies it with the diffuse
         // map, so tinting both would square the colour and render nearly black.
         PhongMaterial material = new PhongMaterial(Color.WHITE);
-        material.setDiffuseMap(noiseTexture(base, variation, seed));
-        material.setSpecularColor(Color.rgb(46, 48, 52));
-        material.setSpecularPower(18);
+        material.setDiffuseMap(diffuseTexture(base, surface, seed));
+        material.setBumpMap(normalMap(surface, seed));
+        material.setSpecularColor(Color.rgb(52, 54, 58));
+        material.setSpecularPower(20);
         return material;
     }
 

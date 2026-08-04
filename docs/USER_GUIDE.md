@@ -223,6 +223,26 @@ the crane cannot drop anything by itself. The button greys out when nothing is h
 
 ---
 
+## 7b. Wind, and why the crane sometimes refuses to move
+
+**WEATHER** sets a wind speed (0–20 m/s) and the compass point it blows *from*. Wind
+pushes the hanging load off vertical and keeps it moving, so it is the easiest way to see
+what **ANTI-SWAY** is for: pick 12 m/s, swing a load, and try it with the assist off and
+on. Because only the part of the wind blowing along the boom acts on the load, the effect
+changes as you slew.
+
+**Interference protection** stops an axis before the boom or jib would hit the truck's own
+cab, the deck, the ground, or a load standing in the way — the same idea real cranes call
+an interference or anti-collision zone. Two things worth knowing:
+
+- It guards the **arm only**. The rope and hook are never blocked, because lowering a load
+  onto the deck is the job, not a collision.
+- It never traps you: any movement that increases clearance is always allowed, so you can
+  always drive back out of a tight spot.
+
+If an axis stops and the position is nowhere near its limit, this is usually why — check
+what the boom is pointing at.
+
 ## 8. Recording telemetry
 
 Press **REC** in the status panel. From then on, every control cycle (50 per second) is

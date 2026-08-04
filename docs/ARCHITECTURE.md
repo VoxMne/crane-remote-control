@@ -83,6 +83,28 @@ overlays the center pane; the choice survives profile switches, views are recrea
 profile. Both views deflect the rope by the optional `"loadSway"` state entry (0 when
 absent) and show the E-STOP banner.
 
+## Interference protection (V3.1)
+`com.vukotic.crane.core.geometry` holds the machine's **physical model** as data:
+`CraneGeometry` gives the dimensions and computes where the boom tip, jib tip and hook
+are for a set of axis positions; `Aabb`/`Vec3` provide the collision volumes and tests.
+Frame: **Y up**, metres, origin on the ground under the slew axis — the renderers
+convert (JavaFX points Y down).
+
+`CollisionGuardFilter` is a `DemandFilter` in the assist chain, and it runs **last** so
+it vetoes whatever the other assists asked for; the safety layer still follows it. Each
+tick it predicts every commanded axis {@value CollisionGuardFilter#LOOKAHEAD_SECONDS} s
+ahead and zeroes that axis if the arm would come within the clearance margin of the cab,
+the deck, the ground or a load standing in the way. Two deliberate rules:
+
+- **Only the arm is guarded, never the rope or hook.** Lowering a load onto the deck is
+  the job, not a collision — guarding it would make the crane refuse to work.
+- **Motion that increases clearance is always allowed**, so the operator can always back
+  out of a tight spot. A guard that latched you into a corner would be worse than none.
+
+The UI feeds the guard the box of any set-down load via `Crane3DView.loadObstacles()`.
+(Geometry belongs in the profile eventually, so a JSON file fully describes its machine —
+noted in docs/BACKLOG.md.)
+
 ## Vehicle, loads and driver mode (V3)
 - **Layout.** The crane's slew axis is the *vehicle* origin. The cab sits ahead of it
   (−X) and the load bed runs behind it (+X), exactly like a real loader crane, so the

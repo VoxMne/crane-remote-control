@@ -197,6 +197,27 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — Verified by real-window capture: load set on the deck, truck driving away
       with it at 13 km/h
 
+## V3.1.0 — wind, interference protection, graphics
+- [x] DONE — Wind: speed slider + compass bearing in a WEATHER panel; drag scales with
+      the square of wind speed and only the component along the boom's swing plane acts
+      on the sway model. Test: 15 m/s holds the load clearly off vertical
+- [x] DONE — `core.geometry` (Vec3/Aabb/CraneGeometry): the machine's physical model as
+      data, Y-up, shared by the collision guard
+- [x] DONE — `CollisionGuardFilter`: predictive interference protection, runs last in the
+      assist chain, guards the arm (not the rope/hook), always allows backing out.
+      7 tests including simulated runs that prove the arm stops before penetrating
+- [x] DONE — Graphics: patterned procedural textures (slab joints, plank seams) with
+      matching normal maps, directional sunlight, stacked-container background yard
+- [x] DONE — Command thread runs at max priority so heavy frames can never starve it
+
+## Known limits (honest scope)
+- Collision covers the **arm** against the cab, deck, ground and set-down loads. It is
+  not a rigid-body physics engine: no rope dynamics, no tipping, no contact friction,
+  and the hanging load is pushed clear rather than resolved with real contacts.
+- Graphics are at the JavaFX ceiling: no shadow mapping, no PBR, no post-processing.
+  A `CraneSceneView` implementation on jMonkeyEngine/libGDX could lift that without
+  touching the control or safety code — a deliberate future option, not scheduled.
+
 ## Saved for later (V2 items 8-24)
 - LMI + capacity charts · outriggers/tipping · hydraulic realism · wind · 2-axis sway
 - point-and-lift · geofencing · training mode · replay
