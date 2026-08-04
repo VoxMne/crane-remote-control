@@ -261,10 +261,25 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — Tests: `HookClearanceTest` pins the surface heights and the rope arithmetic,
       including that the hook ends up clear of a load but still within pick-up reach
 
+## V3.4.2 — a load has to fit on the deck (reported from the field)
+- [x] DONE — A load was set down centred wherever the hook was, with nothing checking it
+      fitted: a boat lowered near the back of the bed rested with its stern driven
+      through the headboard and hanging past the end of the truck. `keepClearOfTruck`
+      now steers the footprint into the usable deck rectangle once the load is low
+      enough to foul the headboard or the rails
+- [x] DONE — Footprints use the enclosing box of the **rotated** load, so a boat lying
+      across the truck is 1.5 m fore-and-aft rather than 4.2 m. `loadObstacles()` reports
+      the same extents, so the interference guard sees the real volume
+- [x] DONE — Tests extended: the reported placement (hook at x = 5.84 with a 4.2 m boat)
+      must end up clear of both the headboard and the mast
+
 ## Known limits (honest scope)
-- Collision covers the **arm** against the cab, deck, ground and set-down loads. It is
-  not a rigid-body physics engine: no rope dynamics, no tipping, no contact friction,
-  and the hanging load is pushed clear rather than resolved with real contacts.
+- Collision covers the **arm** against the cab, deck, ground and set-down loads, and the
+  **rope, hook and load** against the deck, the cab roof, the headboard and each other.
+  It is not a rigid-body physics engine: no rope dynamics, no tipping, no contact
+  friction, and loads are steered clear of structures rather than resolved with real
+  contacts. A load whose centre is off the bed goes to the ground and can still clip the
+  deck edge on the way past.
 - Graphics are at the JavaFX ceiling: no shadow mapping, no PBR, no post-processing.
   A `CraneSceneView` implementation on jMonkeyEngine/libGDX could lift that without
   touching the control or safety code — a deliberate future option, not scheduled.

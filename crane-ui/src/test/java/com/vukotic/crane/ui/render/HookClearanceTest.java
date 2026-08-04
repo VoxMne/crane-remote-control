@@ -69,4 +69,49 @@ class HookClearanceTest {
         assertEquals(0.0, Crane3DView.ropeToSurface(-0.5, 0.0),
                 "no negative rope when the jib tip is already at hook height");
     }
+
+    // ---- where a load may stand on the deck ----
+
+    /** Small boat: 4.2 m long, 1.5 m wide. */
+    private static final double BOAT_LENGTH = 4.2;
+    private static final double BOAT_WIDTH = 1.5;
+    /** Front face of the headboard, and the mast keep-out radius. */
+    private static final double DECK_REAR_LIMIT = 6.15 - 0.06;
+    private static final double MAST_KEEP_OUT = 0.95;
+
+    @Test
+    void aSlewedLoadTakesUpLessRoomForeAndAft() {
+        assertEquals(BOAT_LENGTH / 2,
+                Crane3DView.rotatedHalfExtentX(BOAT_LENGTH, BOAT_WIDTH, 0), 1e-9);
+        assertEquals(BOAT_WIDTH / 2,
+                Crane3DView.rotatedHalfExtentX(BOAT_LENGTH, BOAT_WIDTH, 90), 1e-9,
+                "lying across the truck a boat is 1.5 m long fore-and-aft, not 4.2");
+    }
+
+    @Test
+    void aLoadCannotBeSetDownThroughTheHeadboard() {
+        // The reported case: the hook was out at x = 5.84, so a 4.2 m boat centred
+        // there ran from 3.74 to 7.94 — 1.8 m of it through the headboard and out
+        // past the end of the truck.
+        double halfX = Crane3DView.rotatedHalfExtentX(BOAT_LENGTH, BOAT_WIDTH, 0);
+        double placed = Crane3DView.clampOntoDeckX(5.84, halfX);
+
+        assertTrue(placed + halfX <= DECK_REAR_LIMIT + 1e-9,
+                "the stern must stop at the headboard, not go through it");
+        assertTrue(placed - halfX >= MAST_KEEP_OUT - 1e-9,
+                "and the bow must stay clear of the mast");
+    }
+
+    @Test
+    void aLoadAlreadyOnTheDeckIsLeftWhereItIs() {
+        double halfX = Crane3DView.rotatedHalfExtentX(BOAT_LENGTH, BOAT_WIDTH, 0);
+        assertEquals(3.5, Crane3DView.clampOntoDeckX(3.5, halfX), 1e-9,
+                "a load that already fits must not be shoved around");
+    }
+
+    @Test
+    void aLoadTooLongForTheDeckGoesToTheMiddle() {
+        double placed = Crane3DView.clampOntoDeckX(5.0, 12.0);
+        assertEquals((-0.85 + 6.15) / 2, placed, 1e-9);
+    }
 }

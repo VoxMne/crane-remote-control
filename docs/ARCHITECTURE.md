@@ -176,6 +176,28 @@ pick-up is armed rather than automatic — the hook has to be taken clear of the
 (1.6 m) before it will hook it again. Without that pairing, a load could be set down
 and would instantly be snatched back up.
 
+## Where a load may stand (V3.4.2)
+Vertical clearance was only half of it. A load was still set down centred wherever
+the hook happened to be, with nothing checking that it *fitted*: a boat lowered near
+the back of the bed came to rest with its stern through the headboard and hanging in
+the air past the end of the truck.
+
+`keepClearOfTruck` now owns both rules. Above the headboard it only keeps the load
+out of the mast, as before. Once the load is low enough to foul the deck furniture it
+steers the footprint into the usable deck rectangle — clear of the mast at the front,
+of the headboard at the rear, inside the side rails — so the load slides into place as
+it comes down rather than intersecting the truck.
+
+The footprint is the enclosing box of the *rotated* load, since a load is drawn yawed
+by the slew angle: a 4.2 m boat lying across the truck takes up 1.5 m fore-and-aft,
+and treating it as 4.2 would refuse placements that are perfectly fine.
+`loadObstacles()` uses the same rotated extents, so the core's interference guard is
+told about the volume the load actually occupies.
+
+Still a simplification, and worth saying out loud: this steers loads, it does not
+resolve contacts. A load whose *centre* is off the bed goes to the ground and may
+still clip the deck edge on the way past.
+
 ## 3D view landmines (learned the hard way)
 - **`SubScene.setFill(...)` must be a solid `Color`.** With a `LinearGradient` fill the
   SubScene's buffer is never cleared between frames, so moving geometry (boom, hook,

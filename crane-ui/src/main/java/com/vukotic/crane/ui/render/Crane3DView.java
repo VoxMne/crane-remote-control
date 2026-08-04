@@ -88,6 +88,9 @@ public final class Crane3DView implements CraneSceneView {
     private static final double BED_HALF_WIDTH = 1.2;
     private static final double BED_CENTRE_X = (BED_FRONT_X + BED_REAR_X) / 2;
     private static final double BED_LENGTH = BED_REAR_X - BED_FRONT_X;
+    /** Headboard: a 0.12 m thick, 0.9 m tall wall standing at the rear of the deck. */
+    private static final double HEADBOARD_TOP_Y = -(BED_HEIGHT + 0.9);
+    private static final double DECK_REAR_LIMIT = BED_REAR_X - 0.06;
     /** Loads may not be set down inside this radius of the mast. */
     private static final double MAST_KEEP_OUT_RADIUS = 0.95;
 
@@ -214,6 +217,8 @@ public final class Crane3DView implements CraneSceneView {
      * range forever and snatch the load straight back up.
      */
     private boolean cargoPickupArmed;
+    /** Slew angle the load was set down at; it keeps that yaw while it stands there. */
+    private double restingSlewDeg;
     /** Resting position: world coordinates, or vehicle-local while on the bed. */
     private double cargoX;
     private double cargoY;
@@ -447,8 +452,12 @@ public final class Crane3DView implements CraneSceneView {
             // Vehicle frame is Y-down with the origin at ground level; the core
             // frame is Y-up. Only the vertical axis needs flipping.
             Vec3 centre = new Vec3(local.getX(), -local.getY(), local.getZ());
+            // The load was set down slewed, so its footprint is the enclosing box
+            // of the rotated one — describing a crosswise boat as 4.2 m along X
+            // would guard the wrong volume.
             obstacles.add(Aabb.centred(centre,
-                    cargoType.length(), cargoType.height(), cargoType.width()));
+                    loadHalfExtentX(restingSlewDeg) * 2, cargoType.height(),
+                    loadHalfExtentZ(restingSlewDeg) * 2));
         }
         return obstacles;
     }
@@ -579,8 +588,8 @@ public final class Crane3DView implements CraneSceneView {
     private boolean overRestingLoad(double worldX, double worldZ) {
         Point3D point = worldToVehicle(new Point3D(worldX, 0, worldZ));
         Point3D load = worldToVehicle(restingWorldPosition());
-        return Math.abs(point.getX() - load.getX()) < cargoType.length() / 2
-                && Math.abs(point.getZ() - load.getZ()) < cargoType.width() / 2;
+        return Math.abs(point.getX() - load.getX()) < loadHalfExtentX(restingSlewDeg)
+                && Math.abs(point.getZ() - load.getZ()) < loadHalfExtentZ(restingSlewDeg);
     }
 
     /** Seconds since the previous update, clamped against pauses and hiccups. */
@@ -793,7 +802,7 @@ public final class Crane3DView implements CraneSceneView {
         if (cargoAttached) {
             Point3D hanging = new Point3D(
                     hookWorld.getX(), hookWorld.getY() + 0.12 + halfHeight, hookWorld.getZ());
-            hanging = pushClearOfMast(hanging);
+            hanging = keepClearOfTruck(hanging, slewDeg);
 
             double support = supportHeight(hanging.getX(), hanging.getZ());
             double resting = support - halfHeight;
@@ -809,6 +818,8 @@ public final class Crane3DView implements CraneSceneView {
                 cargoZ = hanging.getZ();
             }
             cargoRotate.setAngle(truckHeadingDeg + slewDeg);
+            // Remember the yaw it would be left at: once down, it keeps that angle.
+            restingSlewDeg = slewDeg;
         } else {
             Point3D world = restingWorldPosition();
             double support = supportHeight(world.getX(), world.getZ());
@@ -907,11 +918,62 @@ public final class Crane3DView implements CraneSceneView {
     }
 
     /**
-     * Keeps a hanging load out of the mast: inside the keep-out cylinder it is
-     * nudged radially outwards, which is what a banksman would do with a tag line.
+     * Half the load's extent along the vehicle's X axis once it has been slewed.
+     * The load is drawn rotated by the slew angle, so a 4.2 m boat lying across
+     * the truck occupies 1.5 m fore-and-aft, not 4.2 — and treating it as 4.2
+     * would refuse placements that are perfectly fine.
      */
-    private Point3D pushClearOfMast(Point3D world) {
+    private double loadHalfExtentX(double slewDeg) {
+        return rotatedHalfExtentX(cargoType.length(), cargoType.width(), slewDeg);
+    }
+
+    private double loadHalfExtentZ(double slewDeg) {
+        return rotatedHalfExtentX(cargoType.width(), cargoType.length(), slewDeg);
+    }
+
+    /** Half-extent along X of a {@code length}×{@code width} box yawed by the slew. */
+    static double rotatedHalfExtentX(double length, double width, double slewDeg) {
+        double cos = Math.abs(Math.cos(Math.toRadians(slewDeg)));
+        double sin = Math.abs(Math.sin(Math.toRadians(slewDeg)));
+        return length / 2 * cos + width / 2 * sin;
+    }
+
+    /**
+     * Where a load of half-length {@code halfX} may stand on the deck: clear of the
+     * mast at the front and of the headboard at the rear. A load too long for the
+     * deck goes to the middle, which is the least wrong place for it.
+     */
+    static double clampOntoDeckX(double centreX, double halfX) {
+        double minX = MAST_KEEP_OUT_RADIUS + halfX;
+        double maxX = DECK_REAR_LIMIT - halfX;
+        return minX <= maxX ? Math.clamp(centreX, minX, maxX) : BED_CENTRE_X;
+    }
+
+    /**
+     * Keeps a load clear of the truck's own structure.
+     *
+     * <p>Out of the mast, as before: inside the keep-out cylinder the load is
+     * nudged radially outwards, which is what a banksman would do with a tag line.
+     *
+     * <p>And, once it is low enough to foul them, inside the deck. A load was
+     * previously set down centred wherever the hook happened to be, with nothing
+     * checking that it actually fitted: a boat lowered near the back of the bed
+     * came to rest with its stern driven straight through the headboard and
+     * hanging in the air past the end of the truck. Below the headboard the
+     * footprint is therefore steered into the usable deck rectangle — clear of the
+     * mast at the front, of the headboard at the rear, and of the side rails.
+     */
+    private Point3D keepClearOfTruck(Point3D world, double slewDeg) {
         Point3D local = worldToVehicle(world);
+
+        // Low enough to hit the headboard or the rails, and heading for the deck.
+        if (local.getY() > HEADBOARD_TOP_Y && isOverBed(local.getX(), local.getZ())) {
+            double x = clampOntoDeckX(local.getX(), loadHalfExtentX(slewDeg));
+            double limitZ = Math.max(0.0, BED_HALF_WIDTH - loadHalfExtentZ(slewDeg));
+            double z = Math.clamp(local.getZ(), -limitZ, limitZ);
+            return vehicleToWorld(new Point3D(x, local.getY(), z));
+        }
+
         double radius = Math.hypot(local.getX(), local.getZ());
         double clearance = MAST_KEEP_OUT_RADIUS + cargoType.length() / 2;
         if (radius >= clearance || local.getY() > -0.2) {
