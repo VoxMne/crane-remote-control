@@ -168,6 +168,19 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — Snapshot probe now loads the BOAT cargo, exercising the hull mesh
       that failed, as a permanent regression shot
 
+## V2.0.3 — the real 3D corruption fix
+- [x] DONE — **Root cause found: `SubScene.setFill(LinearGradient)` skips the
+      per-frame buffer clear.** Moving geometry accumulated on screen, smearing the
+      boom, hook and shadows into swept fans; static geometry looked fine. The
+      v2.0.2 mesh rewrite and `prism.dirtyopts=false` were both dead ends.
+- [x] DONE — Fill is now a solid Color; the sky gradient became real geometry
+      (self-illuminated sky dome with a procedurally generated gradient texture)
+- [x] DONE — Window title shows the version (`Implementation-Version` from the jar
+      manifest), so any screenshot identifies its build
+- [x] DONE — `scripts/capture-window.ps1`: captures the real window, because
+      `Scene.snapshot()` renders offscreen and is blind to on-screen artefacts —
+      the reason this bug survived three releases of "verified" screenshots
+
 ## Saved for later (V2 items 8-24)
 - LMI + capacity charts · outriggers/tipping · hydraulic realism · wind · 2-axis sway
 - point-and-lift · geofencing · training mode · replay

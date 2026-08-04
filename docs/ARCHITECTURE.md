@@ -83,6 +83,17 @@ overlays the center pane; the choice survives profile switches, views are recrea
 profile. Both views deflect the rope by the optional `"loadSway"` state entry (0 when
 absent) and show the E-STOP banner.
 
+## 3D view landmines (learned the hard way)
+- **`SubScene.setFill(...)` must be a solid `Color`.** With a `LinearGradient` fill the
+  SubScene's buffer is never cleared between frames, so moving geometry (boom, hook,
+  shadows) accumulates into swept fans of stale pixels while static geometry looks
+  perfectly fine. The sky gradient is therefore real geometry — a self-illuminated
+  sky dome (`buildSkyDome()`), not a fill.
+- **`Scene.snapshot()` cannot see this class of bug.** It renders fresh offscreen, so
+  the snapshot probe showed a clean crane while the on-screen window smeared. Rendering
+  regressions must be verified by capturing the actual window
+  (`scripts/capture-window.ps1`), not by snapshots.
+
 ## 3D world (M5)
 Everything is procedural — `MeshFactory` builds `TriangleMesh` shapes (tapered,
 chamfered beam sections; a stylised boat hull). Each triangle is emitted once, oriented

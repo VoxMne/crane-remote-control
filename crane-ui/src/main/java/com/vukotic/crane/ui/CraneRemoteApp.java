@@ -174,7 +174,8 @@ public final class CraneRemoteApp extends Application {
 
         activateProfile(catalog.get(0));
 
-        stage.setTitle("Crane Remote Control");
+        String version = getClass().getPackage().getImplementationVersion();
+        stage.setTitle("Crane Remote Control" + (version == null ? " (dev)" : " " + version));
         stage.setMinWidth(1000);
         stage.setMinHeight(640);
         stage.setScene(scene);
@@ -357,7 +358,7 @@ public final class CraneRemoteApp extends Application {
                     operatorInput.keyPressed("Q");
                     operatorInput.keyPressed("W");
                 }),
-                frameAt(12.0, javafx.application.Platform::exit));
+                frameAt(25.0, javafx.application.Platform::exit));
         script.play();
     }
 

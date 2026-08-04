@@ -13,12 +13,12 @@ import javafx.scene.SceneAntialiasing;
 import javafx.scene.SubScene;
 import javafx.scene.control.Label;
 import javafx.scene.layout.StackPane;
+import javafx.scene.image.PixelWriter;
+import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
-import javafx.scene.paint.CycleMethod;
-import javafx.scene.paint.LinearGradient;
 import javafx.scene.paint.PhongMaterial;
-import javafx.scene.paint.Stop;
 import javafx.scene.shape.Box;
+import javafx.scene.shape.CullFace;
 import javafx.scene.shape.Cylinder;
 import javafx.scene.shape.MeshView;
 import javafx.scene.shape.Sphere;
@@ -82,6 +82,11 @@ public final class Crane3DView implements CraneSceneView {
     private static final Color WATER = Color.web("#1d4f6b");
     private static final Color BOAT_HULL = Color.web("#d9dde0");
     private static final Color SHADOW = Color.rgb(0, 0, 0, 0.34);
+
+    // ---- sky ----
+    private static final Color SKY_ZENITH = Color.web("#0d1b2a");
+    private static final Color SKY_HORIZON = Color.web("#5c6470");
+    private static final double SKY_RADIUS = 260;
 
     // ---- world layout ----
     private static final double DOCK_EDGE_Z = 12.0;
@@ -229,7 +234,7 @@ public final class Crane3DView implements CraneSceneView {
 
         cargoGroup.getTransforms().addAll(cargoTranslate, cargoRotate);
 
-        Group worldRoot = new Group(ambient, sunLight, buildSun(), buildGround(),
+        Group worldRoot = new Group(ambient, sunLight, buildSkyDome(), buildSun(), buildGround(),
                 buildWaterAndDock(), buildStaticShadows(), buildTruck(),
                 hookShadow, superstructure, cargoGroup, cameraRig);
 
@@ -237,11 +242,11 @@ public final class Crane3DView implements CraneSceneView {
         // than a whole frame budget on modest GPUs, and a stalled frame used to
         // starve the control loop's watchdog.
         SubScene subScene = new SubScene(worldRoot, 1, 1, true, SceneAntialiasing.DISABLED);
-        subScene.setFill(new LinearGradient(0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
-                new Stop(0.00, Color.web("#0d1b2a")),
-                new Stop(0.55, Color.web("#294055")),
-                new Stop(0.82, Color.web("#5c6470")),
-                new Stop(1.00, Color.web("#8a7358"))));
+        // MUST stay a solid Color. A LinearGradient fill here silently skips the
+        // SubScene's per-frame buffer clear, so moving geometry (boom, hook,
+        // shadows) smears into swept fans of stale pixels. The sky gradient is
+        // therefore real geometry — see buildSkyDome().
+        subScene.setFill(SKY_HORIZON);
         subScene.setCamera(camera);
         subScene.widthProperty().bind(container.widthProperty());
         subScene.heightProperty().bind(container.heightProperty());
@@ -534,6 +539,30 @@ public final class Crane3DView implements CraneSceneView {
     }
 
     // ---- static scenery ----
+
+    /**
+     * The sky, as geometry rather than a SubScene fill: a large sphere seen from
+     * the inside, painted with a procedurally generated vertical gradient and
+     * lit by its own self-illumination map so the scene lights never touch it.
+     */
+    private static Node buildSkyDome() {
+        int height = 256;
+        WritableImage gradient = new WritableImage(1, height);
+        PixelWriter pixels = gradient.getPixelWriter();
+        for (int y = 0; y < height; y++) {
+            // Sphere texture v runs top → bottom, matching zenith → horizon.
+            pixels.setColor(0, y, SKY_ZENITH.interpolate(SKY_HORIZON, (double) y / (height - 1)));
+        }
+
+        PhongMaterial material = new PhongMaterial(Color.BLACK);
+        material.setSelfIlluminationMap(gradient);
+
+        Sphere dome = new Sphere(SKY_RADIUS);
+        dome.setMaterial(material);
+        dome.setCullFace(CullFace.FRONT); // we are inside it
+        dome.setMouseTransparent(true);
+        return dome;
+    }
 
     private static Node buildSun() {
         Sphere sun = new Sphere(3.4);

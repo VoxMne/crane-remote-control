@@ -20,6 +20,15 @@ application {
     mainClass.set("com.vukotic.crane.ui.Launcher")
 }
 
+// Stamp the version into the jar so the HMI can show it in its title bar —
+// a screenshot then always says which build it came from.
+tasks.jar {
+    manifest {
+        attributes("Implementation-Title" to "Crane Remote Control",
+                "Implementation-Version" to project.version)
+    }
+}
+
 // Forward dev/diagnostic properties from the Gradle JVM to the app JVM, e.g.
 //   gradlew :crane-ui:run "-Dcrane.devSnapshotDir=<dir>" "-Dprism.verbose=true"
 tasks.named<JavaExec>("run") {
@@ -42,7 +51,7 @@ runtime {
         installerName = "CraneRemoteControl"
         // jpackage rejects a leading 0 in MSI versions, so the package version
         // stays 1.x even while the project is 0.x.
-        appVersion = "2.0.2"
+        appVersion = "2.0.3"
         installerType = "msi"
         installerOptions = listOf(
                 "--vendor", "Vukotic",
