@@ -137,6 +137,12 @@ public final class CraneRemoteApp extends Application {
     private CameraMode cameraChoice = CameraMode.ORBIT;
     private CargoType cargoChoice = CargoType.NONE;
 
+    // Weather: survives profile/driver switches; only the simulator models it.
+    private volatile SimulatedCraneDriver simulator;
+    private double windSpeed;
+    private double windFromDeg;
+    private Label windInfo;
+
     // Driver mode: crane locked out, truck drivable with the arrow keys.
     private boolean driverMode;
     private ToggleButton driverModeButton;
@@ -476,9 +482,21 @@ public final class CraneRemoteApp extends Application {
     /** The crane back-end for the current driver choice. */
     private CraneDriver createSelectedDriver() {
         if (driverChoice.startsWith(DRIVER_SERIAL_PREFIX)) {
+            simulator = null;
             return new SerialCraneDriver(driverChoice.substring(DRIVER_SERIAL_PREFIX.length()));
         }
-        return new SimulatedCraneDriver();
+        SimulatedCraneDriver sim = new SimulatedCraneDriver();
+        sim.setWind(windSpeed, windFromDeg);   // carry the weather across restarts
+        simulator = sim;
+        return sim;
+    }
+
+    /** Pushes the current weather to the simulator, if one is running. */
+    private void applyWind() {
+        SimulatedCraneDriver sim = simulator;
+        if (sim != null) {
+            sim.setWind(windSpeed, windFromDeg);
+        }
     }
 
     /** Timestamped entry in the alarm history (driver failures, notable events). */
@@ -506,6 +524,9 @@ public final class CraneRemoteApp extends Application {
 
         panel.getChildren().add(sectionLabel("TRUCK & LOAD"));
         panel.getChildren().add(buildTruckControls());
+
+        panel.getChildren().add(sectionLabel("WEATHER"));
+        panel.getChildren().add(buildWindControls());
 
         estopButton = new ToggleButton("E-STOP");
         estopButton.setMinHeight(84);
@@ -635,6 +656,44 @@ public final class CraneRemoteApp extends Application {
         driverInfo.setStyle("-fx-text-fill: " + TEXT_DIM + "; -fx-font-size: 11px;");
 
         return new VBox(6, driverModeButton, releaseButton, driverInfo);
+    }
+
+    /** Compass points, clockwise from north — the direction the wind blows FROM. */
+    private static final String[] COMPASS_POINTS =
+            {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+
+    /**
+     * Wind speed and bearing. Wind pushes the hanging load off vertical and
+     * excites the sway model, so it makes anti-sway visibly worth having.
+     */
+    private VBox buildWindControls() {
+        Slider speed = new Slider(0, 20, windSpeed);
+        speed.setFocusTraversable(false);
+        speed.setMaxWidth(Double.MAX_VALUE);
+
+        ComboBox<String> direction = new ComboBox<>(
+                FXCollections.observableArrayList(COMPASS_POINTS));
+        direction.setMaxWidth(Double.MAX_VALUE);
+        direction.setFocusTraversable(false);
+        direction.setValue(COMPASS_POINTS[(int) Math.round(windFromDeg / 45.0) % 8]);
+
+        windInfo = new Label();
+        windInfo.setStyle("-fx-text-fill: " + TEXT_DIM + "; -fx-font-size: 11px;");
+
+        Runnable apply = () -> {
+            windSpeed = speed.getValue();
+            int index = java.util.Arrays.asList(COMPASS_POINTS).indexOf(direction.getValue());
+            windFromDeg = Math.max(0, index) * 45.0;
+            applyWind();
+            windInfo.setText(windSpeed < 0.5
+                    ? "still air"
+                    : String.format("%.0f m/s from %s", windSpeed, direction.getValue()));
+        };
+        speed.valueProperty().addListener((obs, was, now) -> apply.run());
+        direction.setOnAction(event -> apply.run());
+        apply.run();
+
+        return new VBox(4, speed, direction, windInfo);
     }
 
     private static String assistStyle(boolean on) {

@@ -100,8 +100,13 @@ final class LoadSwayModel {
      *                          sane minimum so the math never explodes)
      * @param pivotSpeedMps     heuristic horizontal boom-tip speed, m/s; the model
      *                          differentiates it numerically into {@code aPivot}
+     * @param windAccelMps2     horizontal wind acceleration on the load, m/s²,
+     *                          positive blowing radially <em>outward</em> (away
+     *                          from the mast). A steady wind therefore parks the
+     *                          load at {@code atan(aWind / g)} off vertical.
      */
-    void step(double dtSeconds, double ropeLengthMeters, double pivotSpeedMps) {
+    void step(double dtSeconds, double ropeLengthMeters, double pivotSpeedMps,
+              double windAccelMps2) {
         if (dtSeconds <= 0) {
             return;
         }
@@ -117,9 +122,12 @@ final class LoadSwayModel {
         int substeps = Math.max(1, (int) Math.ceil(dtSeconds / MAX_SUBSTEP_SECONDS));
         double h = dtSeconds / substeps;
         for (int i = 0; i < substeps; i++) {
+            // Wind acts on the bob, which is equivalent to accelerating the pivot
+            // the other way — hence the opposite sign to the aPivot term.
             double accel = -(GRAVITY / ropeLengthMeters) * Math.sin(angleRad)
                     - dampingPerSecond * angularVelocityRad
-                    - (aPivot / ropeLengthMeters) * Math.cos(angleRad);
+                    - (aPivot / ropeLengthMeters) * Math.cos(angleRad)
+                    + (windAccelMps2 / ropeLengthMeters) * Math.cos(angleRad);
             // Semi-implicit Euler: update velocity first, then position with it.
             angularVelocityRad += accel * h;
             angleRad += angularVelocityRad * h;

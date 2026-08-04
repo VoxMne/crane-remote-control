@@ -17,7 +17,7 @@ class LoadSwayModelTest {
         int signChanges = 0;
         double previous = model.angleDegrees();
         for (double t = 0; t < 20.0; t += DT) {
-            model.step(DT, 5.0, 0.0);
+            model.step(DT, 5.0, 0.0, 0.0);
             double angle = model.angleDegrees();
             if (Math.signum(angle) != Math.signum(previous) && Math.abs(angle) > 1e-6) {
                 signChanges++;
@@ -39,7 +39,7 @@ class LoadSwayModelTest {
         LoadSwayModel model = new LoadSwayModel(0.0); // undamped for a clean period
         model.displace(10.0);
         for (double t = 0; t < 10.0; t += DT) {
-            model.step(DT, ropeLength, 0.0);
+            model.step(DT, ropeLength, 0.0, 0.0);
             if (model.angleDegrees() <= 0.0) {
                 return t;
             }
@@ -51,7 +51,7 @@ class LoadSwayModelTest {
     void resetForgetsAllState() {
         LoadSwayModel model = new LoadSwayModel();
         model.displace(15.0);
-        model.step(DT, 5.0, 2.0);
+        model.step(DT, 5.0, 2.0, 0.0);
         model.reset();
         assertEquals(0.0, model.angleDegrees());
         assertEquals(0.0, model.angularVelocityDegreesPerSecond());

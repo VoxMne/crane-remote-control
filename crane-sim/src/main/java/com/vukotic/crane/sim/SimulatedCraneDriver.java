@@ -72,6 +72,9 @@ public final class SimulatedCraneDriver implements CraneDriver {
     /** Lower clamp on the rope length so the pendulum math never explodes, metres. */
     public static final double MIN_ROPE_LENGTH_METERS = 0.5;
 
+    /** Wind drag per (m/s)² as an acceleration on the load, m/s² — see windAccelAlongBoom(). */
+    private static final double WIND_DRAG_COEFFICIENT = 0.0046;
+
     /** Upper bound on one wall-clock auto-step, guards against scheduling gaps. */
     private static final double MAX_AUTO_STEP_SECONDS = 0.25;
 
@@ -95,6 +98,8 @@ public final class SimulatedCraneDriver implements CraneDriver {
     private final Map<String, Double> velocities = new LinkedHashMap<>();
     private final LoadSwayModel sway = new LoadSwayModel();
     private boolean hasWinchAxis;
+    private volatile double windSpeedMps;
+    private volatile double windFromDeg;   // meteorological: direction it blows FROM
     private long lastAutoStepNanos = -1;
 
     /** Wall-clock-stepped sim with the default time constant. */
@@ -113,6 +118,27 @@ public final class SimulatedCraneDriver implements CraneDriver {
         }
         this.timeConstantSeconds = timeConstantSeconds;
         this.wallClockStepping = wallClockStepping;
+    }
+
+    /**
+     * Sets the ambient wind, which pushes the hanging load off vertical and
+     * feeds the sway model.
+     *
+     * @param speedMps wind speed, m/s (0 = still air)
+     * @param fromDeg  meteorological direction the wind blows <em>from</em>,
+     *                 degrees clockwise from north (0 = northerly, 90 = easterly)
+     */
+    public void setWind(double speedMps, double fromDeg) {
+        this.windSpeedMps = Math.max(0, speedMps);
+        this.windFromDeg = fromDeg;
+    }
+
+    public double windSpeedMps() {
+        return windSpeedMps;
+    }
+
+    public double windFromDeg() {
+        return windFromDeg;
     }
 
     /** Deterministic sim for tests: advances only via explicit {@link #step(double)}. */
@@ -266,7 +292,34 @@ public final class SimulatedCraneDriver implements CraneDriver {
                 ? Math.max(MIN_ROPE_LENGTH_METERS, positions.getOrDefault("winch", 0.0))
                 : DEFAULT_ROPE_LENGTH_METERS;
 
-        sway.step(dtSeconds, ropeLength, tipSpeed);
+        sway.step(dtSeconds, ropeLength, tipSpeed, windAccelAlongBoom());
+    }
+
+    /**
+     * Component of the wind's push on the load along the boom's radial direction,
+     * which is the plane the sway model swings in. Drag goes with the square of
+     * wind speed; {@value #WIND_DRAG_COEFFICIENT} is scaled so a stiff 15 m/s
+     * breeze parks the load roughly 6° off vertical.
+     *
+     * <p>The truck's own heading is a visualization concern and is not modelled
+     * here — crane work happens with the vehicle parked.
+     */
+    private double windAccelAlongBoom() {
+        double speed = windSpeedMps;
+        if (speed <= 0) {
+            return 0;
+        }
+        double from = Math.toRadians(windFromDeg);
+        // North is −Z, east is +X; the wind blows opposite its "from" bearing.
+        double towardX = -Math.sin(from);
+        double towardZ = Math.cos(from);
+
+        double slew = Math.toRadians(positions.getOrDefault("slew", 0.0));
+        double boomX = Math.cos(slew);
+        double boomZ = -Math.sin(slew);
+
+        double alignment = towardX * boomX + towardZ * boomZ;
+        return WIND_DRAG_COEFFICIENT * speed * speed * alignment;
     }
 
     private void requireConnected() {

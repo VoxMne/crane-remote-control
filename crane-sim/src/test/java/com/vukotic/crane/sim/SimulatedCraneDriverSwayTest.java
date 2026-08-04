@@ -62,6 +62,34 @@ class SimulatedCraneDriverSwayTest {
                 "fallback rope must keep the model sane, sway=" + sway);
     }
 
+    @Test
+    void steadyWindHoldsTheLoadOffVertical() {
+        SimulatedCraneDriver driver = SimulatedCraneDriver.manuallyStepped();
+        driver.connect(CraneProfiles.demoKnuckleBoom());
+        driver.sendDemands(Map.of("winch", 1.0));      // pay out some rope
+        for (double t = 0; t < 6.0; t += DT) {
+            driver.step(DT);
+        }
+        driver.sendDemands(Map.of());
+        for (double t = 0; t < 20.0; t += DT) {        // let it settle in still air
+            driver.step(DT);
+        }
+        double still = sway(driver);
+
+        // At slew 0 the boom points along +X (east); an easterly blows back
+        // along it, so the load should hang measurably off vertical.
+        driver.setWind(15.0, 90.0);
+        for (double t = 0; t < 40.0; t += DT) {
+            driver.step(DT);
+        }
+        double windy = sway(driver);
+
+        assertTrue(Math.abs(still) < 1.0, "should be near vertical in still air: " + still);
+        assertTrue(Math.abs(windy) > 3.0,
+                "15 m/s wind should hold the load clearly off vertical, got " + windy);
+        assertTrue(Math.abs(windy) < 20.0, "…but not blow it horizontal: " + windy);
+    }
+
     private static double sway(SimulatedCraneDriver driver) {
         return driver.readState().axisPositions().get(SimulatedCraneDriver.LOAD_SWAY_KEY);
     }
