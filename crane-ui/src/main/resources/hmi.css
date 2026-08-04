@@ -1,95 +1,207 @@
-/* Dark industrial HMI theme. Modena derives most control colors from -fx-base,
-   so setting it dark restyles sliders, buttons, combo boxes and list views;
-   the inline styles in CraneRemoteApp then only carry accents. */
+/*
+ * Crane Remote Control — HMI theme.
+ *
+ * Design intent: a product being demonstrated, not a lab rig. One element
+ * shouts (E-STOP); everything else is quiet, evenly weighted and legible on a
+ * laptop screen. Colours and sizes are defined once here as looked-up values so
+ * the whole app shifts together.
+ */
 .root {
-    -fx-base: #1c232b;
-    -fx-background: #14181d;
-    -fx-control-inner-background: #10151a;
+    /* palette */
+    -crane-bg:          #12161b;
+    -crane-panel:       #1a2027;
+    -crane-panel-raised:#212932;
+    -crane-line:        #2c3540;
+    -crane-amber:       #e8b716;
+    -crane-amber-dim:   #8a6d13;
+    -crane-red:         #d64541;
+    -crane-green:       #3fae6a;
+    -crane-text:        #dfe6ec;
+    -crane-text-dim:    #8d9aa6;
+
+    -fx-base: #1a2027;
+    -fx-background: #12161b;
+    -fx-control-inner-background: #0e1216;
     -fx-accent: #e8b716;
     -fx-focus-color: #e8b716;
     -fx-faint-focus-color: #e8b71622;
-    -fx-font-family: "Segoe UI", sans-serif;
+    -fx-font-family: "Segoe UI", "Inter", sans-serif;
+    -fx-font-size: 13px;
 }
 
-/* Touch-friendly: bigger hit targets for gloved/tablet operation. */
-.slider .track {
-    -fx-background-color: #10151a;
-    -fx-pref-height: 8px;
+/* ---------- typography ---------- */
+.h1      { -fx-font-size: 16px; -fx-font-weight: bold;  -fx-text-fill: -crane-text; }
+.h2      { -fx-font-size: 11px; -fx-font-weight: bold;  -fx-text-fill: -crane-amber; }
+.body    { -fx-font-size: 12px; -fx-text-fill: -crane-text; }
+.caption { -fx-font-size: 11px; -fx-text-fill: -crane-text-dim; }
+.readout {
+    -fx-font-family: "Consolas", "JetBrains Mono", monospace;
+    -fx-font-size: 12px;
+    -fx-text-fill: -crane-text;
 }
 
-.slider .thumb {
-    -fx-background-color: #e8b716;
-    -fx-padding: 9px;
+/* ---------- surfaces ---------- */
+.app-header {
+    -fx-background-color: -crane-panel-raised;
+    -fx-border-color: transparent transparent -crane-line transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 8 16 8 16;
 }
 
-.button, .toggle-button, .combo-box {
+.panel {
+    -fx-background-color: -crane-panel;
+    -fx-background-radius: 8;
+}
+
+/* A grouped block inside a panel: quiet border, generous padding. */
+.card {
+    -fx-background-color: -crane-panel-raised;
+    -fx-background-radius: 6;
+    -fx-border-color: -crane-line;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+    -fx-padding: 10;
+}
+
+/* ---------- buttons ---------- */
+.button, .toggle-button {
+    -fx-background-color: transparent;
+    -fx-border-color: -crane-line;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-text-fill: -crane-text;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
     -fx-min-height: 34px;
+    -fx-cursor: hand;
+}
+.button:hover, .toggle-button:hover {
+    -fx-background-color: #27313c;
+    -fx-border-color: #3d4956;
+}
+.button:pressed, .toggle-button:pressed {
+    -fx-background-color: #161d24;
+}
+.toggle-button:selected {
+    -fx-background-color: #3a2f10;
+    -fx-border-color: -crane-amber;
+    -fx-text-fill: -crane-amber;
+}
+.button:disabled, .toggle-button:disabled {
+    -fx-opacity: 0.4;
+    -fx-cursor: default;
 }
 
-/* Axis position bar meters. */
-.progress-bar {
-    -fx-indeterminate-bar-animation-time: 0;
+/* The one element allowed to shout. */
+.estop-button {
+    -fx-background-color: -crane-red;
+    -fx-border-color: transparent;
+    -fx-text-fill: white;
+    -fx-font-size: 24px;
+    -fx-font-weight: 800;
+    -fx-min-height: 76px;
+    -fx-background-radius: 8;
 }
+.estop-button:hover  { -fx-background-color: #e2504c; }
+.estop-button:selected {
+    -fx-background-color: #8f2320;
+    -fx-border-color: white;
+    -fx-border-width: 2;
+    -fx-border-radius: 8;
+}
+
+.primary-button {
+    -fx-border-color: -crane-amber;
+    -fx-text-fill: -crane-amber;
+}
+.primary-button:hover { -fx-background-color: #33290c; }
+
+/* ---------- status pill in the header ---------- */
+.pill {
+    -fx-background-radius: 20;
+    -fx-padding: 3 12 3 12;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+}
+.pill-ok    { -fx-background-color: #16351f; -fx-text-fill: -crane-green; }
+.pill-idle  { -fx-background-color: #232b34; -fx-text-fill: -crane-text-dim; }
+.pill-warn  { -fx-background-color: #3a2f10; -fx-text-fill: -crane-amber; }
+.pill-alarm { -fx-background-color: #3d1a19; -fx-text-fill: -crane-red; }
+
+/* ---------- inputs ---------- */
+.slider .track { -fx-background-color: #0e1216; -fx-pref-height: 6px; }
+.slider .thumb { -fx-background-color: -crane-amber; -fx-padding: 8px; }
+.slider:disabled .thumb { -fx-background-color: #4a525c; }
+
+.combo-box {
+    -fx-background-color: #0e1216;
+    -fx-border-color: -crane-line;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+.combo-box:hover { -fx-border-color: #3d4956; }
+.combo-box .list-cell { -fx-text-fill: -crane-text; -fx-padding: 4 8 4 8; }
+.combo-box-popup .list-view { -fx-background-color: -crane-panel-raised; }
+.combo-box-popup .list-cell:hover { -fx-background-color: #2f3a46; }
 
 .progress-bar > .track {
-    -fx-background-color: #10151a;
+    -fx-background-color: #0e1216;
     -fx-background-radius: 3;
     -fx-background-insets: 0;
 }
-
 .progress-bar > .bar {
-    -fx-background-color: #e8b716;
+    -fx-background-color: -crane-amber;
     -fx-background-radius: 3;
     -fx-background-insets: 1;
     -fx-padding: 4px;
 }
 
-/* SplitPane: thin, dark, draggable dividers. */
-.split-pane {
-    -fx-background-color: transparent;
-    -fx-padding: 0;
-}
+/* ---------- containers ---------- */
+.scroll-pane, .scroll-pane > .viewport { -fx-background-color: transparent; }
+.scroll-bar { -fx-background-color: transparent; }
+.scroll-bar .thumb { -fx-background-color: #333d49; -fx-background-radius: 4; }
+.scroll-bar .thumb:hover { -fx-background-color: #43505f; }
+.scroll-bar .increment-button, .scroll-bar .decrement-button { -fx-opacity: 0; }
 
+.list-view { -fx-background-insets: 0; -fx-padding: 2; -fx-background-color: #0e1216; }
+.list-cell { -fx-background-color: transparent; -fx-font-size: 11px; }
+
+.split-pane { -fx-background-color: transparent; -fx-padding: 0; }
 .split-pane > .split-pane-divider {
-    -fx-background-color: #14181d;
+    -fx-background-color: -crane-bg;
     -fx-padding: 0 3px 0 3px;
 }
-
-.split-pane > .split-pane-divider:hover {
-    -fx-background-color: #2a3440;
-}
-
-/* Panel scrollers: transparent so the panel's own background shows through. */
-.scroll-pane, .scroll-pane > .viewport {
-    -fx-background-color: transparent;
-}
-
-.list-view {
-    -fx-background-insets: 0;
-    -fx-padding: 2;
-}
-
-.list-view .scroll-bar {
-    -fx-background-color: #10151a;
-}
-
-.scroll-bar .thumb {
-    -fx-background-color: #39434c;
-}
-
-.combo-box .list-cell {
-    -fx-text-fill: #d7dee4;
-}
-
-.combo-box-popup .list-view {
-    -fx-background-color: #1c232b;
-}
-
-.combo-box-popup .list-cell:hover {
-    -fx-background-color: #2a3440;
-}
+.split-pane > .split-pane-divider:hover { -fx-background-color: #2f3a46; }
 
 .tooltip {
-    -fx-background-color: #1c232b;
-    -fx-text-fill: #d7dee4;
+    -fx-background-color: #0b0e12;
+    -fx-text-fill: -crane-text;
+    -fx-border-color: -crane-line;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+    -fx-font-size: 11px;
+}
+
+/* ---------- welcome overlay ---------- */
+.welcome-scrim { -fx-background-color: rgba(8, 11, 14, 0.93); }
+.welcome-title { -fx-font-size: 34px; -fx-font-weight: 800; -fx-text-fill: -crane-amber; }
+.welcome-sub   { -fx-font-size: 15px; -fx-text-fill: -crane-text; }
+.welcome-note  { -fx-font-size: 12px; -fx-text-fill: -crane-text-dim; }
+.welcome-button {
+    -fx-font-size: 14px;
+    -fx-min-height: 44px;
+    -fx-border-color: -crane-amber;
+    -fx-text-fill: -crane-amber;
+}
+.welcome-button:hover { -fx-background-color: #33290c; }
+
+/* ---------- demo caption ---------- */
+.demo-caption {
+    -fx-background-color: rgba(11, 14, 18, 0.86);
+    -fx-background-radius: 8;
+    -fx-border-color: -crane-amber-dim;
+    -fx-border-radius: 8;
+    -fx-padding: 10 18 10 18;
+    -fx-font-size: 14px;
+    -fx-text-fill: -crane-text;
 }

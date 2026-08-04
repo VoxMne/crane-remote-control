@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     application
     id("org.openjfx.javafxplugin")
     id("org.beryx.runtime") version "1.13.1"
@@ -51,7 +51,7 @@ runtime {
         installerName = "CraneRemoteControl"
         // jpackage rejects a leading 0 in MSI versions, so the package version
         // stays 1.x even while the project is 0.x.
-        appVersion = "3.1.1"
+        appVersion = "3.2.0"
         installerType = "msi"
         installerOptions = listOf(
                 "--vendor", "Vukotic",

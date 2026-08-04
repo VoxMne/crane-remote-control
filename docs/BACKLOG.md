@@ -210,6 +210,19 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       matching normal maps, directional sunlight, stacked-container background yard
 - [x] DONE — Command thread runs at max priority so heavy frames can never starve it
 
+## V3.2.0 — presentation UI (aimed at demos and sales)
+- [x] DONE — Scenery is solid: container yard registered as collision boxes for both
+      the crane guard and the truck; driving is blocked by body *and* arm
+- [x] DONE — Design system in hmi.css: palette/typography as lookups, card surfaces,
+      one button hierarchy with hover/press/disabled states, E-STOP the only loud element
+- [x] DONE — Header bar: product name, version, profile/driver breadcrumb and a live
+      status pill (READY / RUNNING / DRIVER MODE / BLOCKED / E-STOP LATCHED)
+- [x] DONE — Welcome card on launch: what the product is before the controls appear
+- [x] DONE — **RUN DEMO**: a narrated 40-second sequence (hook a load, set it on the
+      deck, drive away, trip the E-STOP) driven through the real input path, with
+      captions over the scene — built for presenting to manufacturers
+- [x] DONE — Tooltips explaining the safety-critical controls for non-crane audiences
+
 ## Known limits (honest scope)
 - Collision covers the **arm** against the cab, deck, ground and set-down loads. It is
   not a rigid-body physics engine: no rope dynamics, no tipping, no contact friction,

@@ -25,6 +25,7 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
@@ -38,6 +39,7 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Slider;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.ToggleButton;
+import javafx.scene.control.Tooltip;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
@@ -164,6 +166,11 @@ public final class CraneRemoteApp extends Application {
 
     // HMI 2.0: resizable shell, gauges, synthesized cockpit audio.
     private Stage stage;
+    private String version;
+    private StackPane appStack;
+    private Label statusPill;
+    private Label headerSubtitle;
+    private Node welcomeOverlay;
     private SplitPane mainSplit;
     private final SoundEngine soundEngine = new SoundEngine();
     private ToggleButton muteButton;
@@ -173,24 +180,30 @@ public final class CraneRemoteApp extends Application {
     @Override
     public void start(Stage stage) {
         this.stage = stage;
+        version = getClass().getPackage().getImplementationVersion();
+
         root = new BorderPane();
         root.setStyle("-fx-background-color: " + BG + ";");
         mainSplit = new SplitPane();
         mainSplit.setStyle("-fx-background-color: " + BG + "; -fx-background-insets: 0;"
                 + " -fx-padding: 4;");
+        root.setTop(buildHeaderBar());
         root.setCenter(mainSplit);
         // The three panes are (re)built per profile in activateProfile().
 
-        Scene scene = new Scene(root, 1280, 800);
+        // The welcome card sits over the cockpit until dismissed, so the first
+        // thing a visitor sees is what the product is, not a wall of controls.
+        appStack = new StackPane(root, buildWelcomeOverlay());
+
+        Scene scene = new Scene(appStack, 1280, 820);
         scene.getStylesheets().add(getClass().getResource("/hmi.css").toExternalForm());
         installKeyHandlers(scene);
 
         activateProfile(catalog.get(0));
 
-        String version = getClass().getPackage().getImplementationVersion();
         stage.setTitle("Crane Remote Control" + (version == null ? " (dev)" : " " + version));
-        stage.setMinWidth(1000);
-        stage.setMinHeight(640);
+        stage.setMinWidth(1060);
+        stage.setMinHeight(680);
         stage.setScene(scene);
         stage.show();
 
@@ -373,6 +386,7 @@ public final class CraneRemoteApp extends Application {
 
     /** TEMP: drives the crane hard in 3D to prove motion survives render stalls. */
     private void runStressProbe() {
+        dismissWelcome();
         javafx.animation.Timeline script = new javafx.animation.Timeline(
                 frameAt(0.5, () -> {
                     use3d = true;
@@ -417,6 +431,7 @@ public final class CraneRemoteApp extends Application {
      * {@code crane.devSnapshotDir} system property is set.
      */
     private void runDevSnapshotProbe(Stage stage, Path dir) {
+        dismissWelcome();   // the probe photographs the cockpit, not the front door
         javafx.animation.Timeline script = new javafx.animation.Timeline(
                 frameAt(1.0, () -> snapshotScene(stage, dir, "01-2d-rest.png")),
                 frameAt(1.2, () -> {
@@ -486,6 +501,237 @@ public final class CraneRemoteApp extends Application {
         }
     }
 
+    // ---- guided demo ----
+
+    private boolean demoRunning;
+    private javafx.animation.Timeline demoTimeline;
+    private Label demoCaption;
+    private ToggleButton demoButton;
+
+    private Node buildDemoButton() {
+        demoButton = new ToggleButton(">  RUN DEMO");
+        demoButton.getStyleClass().add("primary-button");
+        demoButton.setFocusTraversable(false);
+        demoButton.setTooltip(new Tooltip(
+                "Plays a narrated 40-second sequence: hook a load, set it on the truck, "
+                        + "drive away, and trip the emergency stop."));
+        demoButton.selectedProperty().addListener((obs, was, selected) -> {
+            if (selected) {
+                startDemo();
+            } else {
+                stopDemo();
+            }
+        });
+        return demoButton;
+    }
+
+    private void showCaption(String text) {
+        demoCaption.setText(text);
+        demoCaption.setVisible(true);
+    }
+
+    /**
+     * A scripted presentation of the product: every step narrated, driven through
+     * the same input path an operator uses, so nothing on screen is faked.
+     */
+    private void startDemo() {
+        if (demoRunning) {
+            return;
+        }
+        dismissWelcome();
+        demoRunning = true;
+        demoButton.setSelected(true);
+        demoButton.setText("#  STOP DEMO");
+
+        cargoChoice = CargoType.CONTAINER;
+        applyCargo();
+        cameraChoice = CameraMode.ORBIT;
+        view3d.setCameraMode(cameraChoice);
+        if (!use3d) {
+            showView3d();
+        }
+
+        demoTimeline = new javafx.animation.Timeline(
+                frameAt(0.2, () -> showCaption(
+                        "A container hangs on the hook. Nothing moves yet — the crane "
+                                + "only responds while the operator holds the deadman.")),
+                frameAt(3.0, () -> {
+                    showCaption("Deadman held. Raising the main boom.");
+                    operatorInput.keyPressed("SPACE");
+                    operatorInput.keyPressed("W");
+                }),
+                frameAt(9.0, () -> {
+                    showCaption("Paying out the winch to set the load on the truck's own deck.");
+                    operatorInput.keyReleased("W");
+                    operatorInput.keyPressed("T");
+                }),
+                frameAt(15.0, () -> {
+                    showCaption("Load down. The arm cannot be driven into the truck, the "
+                            + "ground or anything standing nearby — interference protection "
+                            + "stops the axis first.");
+                    operatorInput.keyReleased("T");
+                }),
+                frameAt(20.0, () -> {
+                    showCaption("Driver mode: the crane is locked out completely and the "
+                            + "truck can be driven away with the load aboard.");
+                    operatorInput.keyReleased("SPACE");
+                    driverModeButton.setSelected(true);
+                    drivingKeys.add(KeyCode.UP);
+                }),
+                frameAt(27.0, () -> {
+                    showCaption("Emergency stop: latches instantly, and stays latched until "
+                            + "it is reset with every control at neutral.");
+                    drivingKeys.remove(KeyCode.UP);
+                    driverModeButton.setSelected(false);
+                    estopButton.setSelected(true);
+                }),
+                frameAt(33.0, () -> showCaption(
+                        "The same software drives a simulator or real hardware — the crane "
+                                + "is reached only through a driver interface.")),
+                frameAt(39.0, this::stopDemo));
+        demoTimeline.play();
+    }
+
+    /** Ends the demo and hands a clean, safe machine back to the operator. */
+    private void stopDemo() {
+        if (demoTimeline != null) {
+            demoTimeline.stop();
+            demoTimeline = null;
+        }
+        demoRunning = false;
+        for (String key : List.of("SPACE", "W", "T", "Q")) {
+            operatorInput.keyReleased(key);
+        }
+        drivingKeys.clear();
+        driverModeButton.setSelected(false);
+        estopButton.setSelected(false);
+        operatorInput.requestReset();
+        demoCaption.setVisible(false);
+        demoButton.setSelected(false);
+        demoButton.setText(">  RUN DEMO");
+    }
+
+    private void showView3d() {
+        use3d = true;
+        activeView = view3d;
+        viewStack.getChildren().set(0, activeView.node());
+    }
+
+    // ---- product chrome ----
+
+    /**
+     * Header bar: what the product is, what it is driving, and one status pill
+     * that answers "is it safe and is it moving" from across a room.
+     */
+    private Node buildHeaderBar() {
+        Label title = new Label("CRANE REMOTE CONTROL");
+        title.getStyleClass().add("h1");
+
+        Label versionLabel = new Label(version == null ? "dev build" : "v" + version);
+        versionLabel.getStyleClass().add("caption");
+
+        headerSubtitle = new Label();
+        headerSubtitle.getStyleClass().add("caption");
+
+        statusPill = new Label("READY");
+        statusPill.getStyleClass().addAll("pill", "pill-idle");
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        HBox left = new HBox(10, title, versionLabel);
+        left.setAlignment(Pos.CENTER_LEFT);
+
+        HBox bar = new HBox(16, left, headerSubtitle, spacer, buildDemoButton(), statusPill);
+        bar.setAlignment(Pos.CENTER_LEFT);
+        bar.getStyleClass().add("app-header");
+        return bar;
+    }
+
+    /** Keeps the header pill honest about what the machine is doing. */
+    private void updateStatusPill(CraneState state) {
+        String text;
+        String style;
+        if (state.estopLatched()) {
+            text = "E-STOP LATCHED";
+            style = "pill-alarm";
+        } else if (demoRunning) {
+            text = "DEMO RUNNING";
+            style = "pill-warn";
+        } else if (driverMode) {
+            text = "DRIVER MODE";
+            style = "pill-warn";
+        } else if (backend.isCollisionBlocking()) {
+            text = "BLOCKED — OBSTACLE";
+            style = "pill-warn";
+        } else if (state.deadmanHeld()) {
+            text = "RUNNING";
+            style = "pill-ok";
+        } else {
+            text = "READY — HOLD SPACE";
+            style = "pill-idle";
+        }
+        if (!text.equals(statusPill.getText())) {
+            statusPill.setText(text);
+            statusPill.getStyleClass().removeIf(s -> s.startsWith("pill-"));
+            statusPill.getStyleClass().add(style);
+        }
+        headerSubtitle.setText(profile.name() + "  ·  " + backend.driverName());
+    }
+
+    /**
+     * The welcome card. A visitor should learn what this is before being handed
+     * the controls; the button is the only way past it.
+     */
+    private Node buildWelcomeOverlay() {
+        Label title = new Label("Crane Remote Control");
+        title.getStyleClass().add("welcome-title");
+
+        Label pitch = new Label("Universal control software for hydraulic loader cranes.");
+        pitch.getStyleClass().add("welcome-sub");
+
+        Label detail = new Label("""
+                One program drives any crane: the machine is described by a data file,
+                not by code. A full safety layer — latching emergency stop, hold-to-run,
+                watchdog, limits and interference protection — sits between the operator
+                and the machine, whether that machine is this simulator or real hardware.""");
+        detail.getStyleClass().add("welcome-note");
+        detail.setWrapText(true);
+        detail.setMaxWidth(560);
+
+        Button demo = new Button("Watch the 40-second demo");
+        demo.getStyleClass().addAll("welcome-button", "primary-button");
+        demo.setMaxWidth(320);
+        demo.setOnAction(event -> {
+            dismissWelcome();
+            startDemo();
+        });
+
+        Button explore = new Button("Take the controls");
+        explore.getStyleClass().add("welcome-button");
+        explore.setMaxWidth(320);
+        explore.setOnAction(event -> dismissWelcome());
+
+        Label hint = new Label("Hold SPACE to enable motion · Q/A W/S E/D R/F T/G drive the axes");
+        hint.getStyleClass().add("welcome-note");
+
+        VBox card = new VBox(14, title, pitch, detail, demo, explore, hint);
+        card.setAlignment(Pos.CENTER);
+        card.setPadding(new Insets(40));
+
+        StackPane scrim = new StackPane(card);
+        scrim.getStyleClass().add("welcome-scrim");
+        welcomeOverlay = scrim;
+        return scrim;
+    }
+
+    private void dismissWelcome() {
+        if (welcomeOverlay != null) {
+            appStack.getChildren().remove(welcomeOverlay);
+            welcomeOverlay = null;
+        }
+    }
+
     /** The crane back-end for the current driver choice. */
     private CraneDriver createSelectedDriver() {
         if (driverChoice.startsWith(DRIVER_SERIAL_PREFIX)) {
@@ -536,22 +782,22 @@ public final class CraneRemoteApp extends Application {
         panel.getChildren().add(buildWindControls());
 
         estopButton = new ToggleButton("E-STOP");
-        estopButton.setMinHeight(84);
         estopButton.setMaxWidth(Double.MAX_VALUE);
         estopButton.setFocusTraversable(false);
-        estopButton.setStyle(estopStyle(false));
-        estopButton.selectedProperty().addListener((obs, was, selected) -> {
-            operatorInput.setEstopRequested(selected);
-            estopButton.setStyle(estopStyle(selected));
-        });
+        estopButton.getStyleClass().add("estop-button");
+        estopButton.setTooltip(new Tooltip(
+                "Latches immediately: every demand is forced to zero and stays there "
+                        + "until RESET, with all controls at neutral. Shortcut: Esc"));
+        estopButton.selectedProperty().addListener((obs, was, selected) ->
+                operatorInput.setEstopRequested(selected));
 
         Button resetButton = new Button("RESET");
         resetButton.setMaxWidth(Double.MAX_VALUE);
-        resetButton.setMinHeight(36);
         resetButton.setFocusTraversable(false);
-        resetButton.setStyle("-fx-background-color: " + PANEL_BG + "; -fx-text-fill: " + AMBER + ";"
-                + " -fx-border-color: " + AMBER + "; -fx-border-radius: 6; -fx-background-radius: 6;"
-                + " -fx-font-weight: bold;");
+        resetButton.getStyleClass().add("primary-button");
+        resetButton.setTooltip(new Tooltip(
+                "Clears a latched emergency stop — only accepted with every control "
+                        + "at neutral and the deadman released."));
         resetButton.setOnAction(event -> {
             estopButton.setSelected(false);   // clears the E-STOP request
             operatorInput.requestReset();     // one-shot reset in the next command
@@ -572,12 +818,12 @@ public final class CraneRemoteApp extends Application {
         // only the axis/assist controls above them scroll on a short window.
         VBox safetyBox = new VBox(8, estopButton, resetButton, deadmanIndicator,
                 fullscreenHint);
-        safetyBox.setPadding(new Insets(10, 14, 14, 14));
+        safetyBox.setPadding(new Insets(12, 14, 14, 14));
         safetyBox.setStyle("-fx-background-color: " + PANEL_BG
-                + "; -fx-background-radius: 0 0 6 6;");
+                + "; -fx-background-radius: 0 0 8 8;");
 
         BorderPane column = new BorderPane();
-        column.setStyle("-fx-background-color: " + PANEL_BG + "; -fx-background-radius: 6;");
+        column.getStyleClass().add("panel");
         column.setCenter(scrollable(panel, 0));
         column.setBottom(safetyBox);
         column.setMinWidth(264);
@@ -596,25 +842,19 @@ public final class CraneRemoteApp extends Application {
         }
         smoothToggle.setSelected(smoothingOn);
         antiSwayToggle.setSelected(antiSwayOn);
-        smoothToggle.setStyle(assistStyle(smoothingOn));
-        antiSwayToggle.setStyle(assistStyle(antiSwayOn));
         smoothToggle.selectedProperty().addListener((obs, was, selected) -> {
             smoothingOn = selected;
-            smoothToggle.setStyle(assistStyle(selected));
             backend.configureAssists(smoothingOn, antiSwayOn);
         });
         antiSwayToggle.selectedProperty().addListener((obs, was, selected) -> {
             antiSwayOn = selected;
-            antiSwayToggle.setStyle(assistStyle(selected));
             backend.configureAssists(smoothingOn, antiSwayOn);
         });
 
         foldButton = new ToggleButton("FOLD TO TRANSPORT");
         foldButton.setMaxWidth(Double.MAX_VALUE);
         foldButton.setFocusTraversable(false);
-        foldButton.setStyle(assistStyle(false));
         foldButton.selectedProperty().addListener((obs, was, selected) -> {
-            foldButton.setStyle(assistStyle(selected));
             if (selected) {
                 foldSequencer.start(profile);
             } else {
@@ -639,10 +879,8 @@ public final class CraneRemoteApp extends Application {
         driverModeButton.setMaxWidth(Double.MAX_VALUE);
         driverModeButton.setFocusTraversable(false);
         driverModeButton.setSelected(driverMode);
-        driverModeButton.setStyle(assistStyle(driverMode));
         driverModeButton.selectedProperty().addListener((obs, was, selected) -> {
             driverMode = selected;
-            driverModeButton.setStyle(assistStyle(selected));
             view3d.setDriverMode(selected);
             if (selected) {
                 foldSequencer.cancel();      // no automation while driving
@@ -701,13 +939,6 @@ public final class CraneRemoteApp extends Application {
         apply.run();
 
         return new VBox(4, speed, direction, windInfo);
-    }
-
-    private static String assistStyle(boolean on) {
-        String color = on ? AMBER : TEXT_DIM;
-        return "-fx-background-color: " + BG + "; -fx-text-fill: " + color + ";"
-                + " -fx-border-color: " + color + "; -fx-border-radius: 6;"
-                + " -fx-background-radius: 6; -fx-font-weight: bold; -fx-font-size: 11px;";
     }
 
     private VBox buildAxisControl(AxisSpec axis) {
@@ -774,9 +1005,18 @@ public final class CraneRemoteApp extends Application {
         toggleBar.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
         toggleBar.setPickOnBounds(false);
 
-        StackPane center = new StackPane(viewStack, toggleBar);
+        demoCaption = new Label();
+        demoCaption.getStyleClass().add("demo-caption");
+        demoCaption.setWrapText(true);
+        demoCaption.setMaxWidth(620);
+        demoCaption.setVisible(false);
+        demoCaption.setMouseTransparent(true);
+
+        StackPane center = new StackPane(viewStack, toggleBar, demoCaption);
         // Top-left: the top-right corner belongs to the 2D top-view inset.
         StackPane.setAlignment(toggleBar, Pos.TOP_LEFT);
+        StackPane.setAlignment(demoCaption, Pos.BOTTOM_CENTER);
+        StackPane.setMargin(demoCaption, new Insets(0, 0, 26, 0));
         return center;
     }
 
@@ -1147,6 +1387,7 @@ public final class CraneRemoteApp extends Application {
         }
         recordAlarmHistory(state);
         updateFoldStatus();
+        updateStatusPill(state);
     }
 
     /**
@@ -1289,3 +1530,5 @@ public final class CraneRemoteApp extends Application {
         launch(args);
     }
 }
+
+
