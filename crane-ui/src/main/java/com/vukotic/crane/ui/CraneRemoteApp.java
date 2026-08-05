@@ -479,7 +479,6 @@ public final class CraneRemoteApp extends Application {
         }
         soundEngine.close();
         stopTelemetry();
-        stopViewerFeed();
         if (backend != null) {
             backend.stop();
         }
@@ -490,33 +489,8 @@ public final class CraneRemoteApp extends Application {
      * the whole cockpit for the given profile. Runs on the FX thread; the frame
      * timer runs on the same thread, so no torn state is ever rendered.
      */
-    /**
-     * The out-of-process visualiser's feed. Rebuilt with the session because its
-     * header names the profile's axes. Purely additive: if it cannot listen, or no
-     * viewer ever connects, nothing about the cockpit changes.
-     */
-    private ViewerFeedServer viewerFeed;
-
-    private void startViewerFeed() {
-        viewerFeed = new ViewerFeedServer(profile);
-        if (viewerFeed.start()) {
-            backend.addStateListener(viewerFeed);
-        } else {
-            viewerFeed = null;
-        }
-    }
-
-    private void stopViewerFeed() {
-        if (viewerFeed != null) {
-            backend.removeStateListener(viewerFeed);
-            viewerFeed.close();
-            viewerFeed = null;
-        }
-    }
-
     private void activateProfile(CraneProfile newProfile) {
         stopTelemetry();
-        stopViewerFeed();
         // Ask the outgoing controller whether it was latched BEFORE stopping it.
         boolean latchWasEngaged = backend != null && backend.isEstopLatched();
         if (backend != null) {
@@ -558,7 +532,6 @@ public final class CraneRemoteApp extends Application {
         if (carriedLatch) {
             backend.engageEstopLatch();
         }
-        startViewerFeed();
         // Published last and as one reference: until this line the command thread
         // still sees the previous session, complete and consistent.
         session = new Session(profile, operatorInput, backend);
