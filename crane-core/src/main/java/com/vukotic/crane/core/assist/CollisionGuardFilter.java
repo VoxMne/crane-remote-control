@@ -83,6 +83,24 @@ public final class CollisionGuardFilter implements DemandFilter {
         Map<String, Double> guarded = new LinkedHashMap<>(demands);
         boolean blocked = false;
 
+        // The COMBINED move is checked first. Predicting each axis on its own let a
+        // boom+jib command through whose individual predictions both cleared the
+        // 0.15 m margin while the pose they produce together left 0.1289 m — the
+        // arm arriving somewhere neither axis was asked to take it. Where they
+        // conspire, every contributing axis is stopped; nothing else would be
+        // sound, since the guard cannot know which one the operator would rather
+        // keep.
+        Map<String, Double> combined = predictedPositions(demands, lastState);
+        if (combined.size() > 1) {
+            double together = clearanceAt(lastState, combined);
+            if (together < CLEARANCE_METRES && together < currentClearance) {
+                combined.keySet().forEach(id -> guarded.put(id, 0.0));
+                blocking = true;
+                return guarded;
+            }
+        }
+
+        // Then each axis alone, which still catches a single axis driving in.
         for (Map.Entry<String, Double> entry : demands.entrySet()) {
             double demand = entry.getValue();
             if (demand == 0) {
@@ -105,6 +123,35 @@ public final class CollisionGuardFilter implements DemandFilter {
         }
         blocking = blocked;
         return guarded;
+    }
+
+    /**
+     * The axes that move the arm through space, and so the only ones that can
+     * combine into a breach. The winch pays out rope; it cannot swing the boom
+     * into the cab, and stopping it because two other axes conspired would freeze
+     * a load in mid-air for no reason.
+     */
+    private static final java.util.Set<String> ARM_AXES =
+            java.util.Set.of("slew", "boom", "jib", "extension");
+
+    /** Where every commanded arm axis would be together, one lookahead from now. */
+    private Map<String, Double> predictedPositions(Map<String, Double> demands,
+                                                   CraneState lastState) {
+        Map<String, Double> predicted = new LinkedHashMap<>();
+        for (Map.Entry<String, Double> entry : demands.entrySet()) {
+            double demand = entry.getValue();
+            if (demand == 0 || !ARM_AXES.contains(entry.getKey())) {
+                continue;
+            }
+            AxisSpec axis = profile.axisById(entry.getKey()).orElse(null);
+            if (axis == null) {
+                continue;
+            }
+            double travel = demand * axis.maxVelocity() * LOOKAHEAD_SECONDS;
+            predicted.put(axis.id(),
+                    axis.clampPosition(lastState.position(axis.id()) + travel));
+        }
+        return predicted;
     }
 
     /**

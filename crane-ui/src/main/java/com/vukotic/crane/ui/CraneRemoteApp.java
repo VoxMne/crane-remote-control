@@ -1292,6 +1292,13 @@ public final class CraneRemoteApp extends Application {
         driverModeButton.setSelected(driverMode);
         driverModeButton.selectedProperty().addListener((obs, was, selected) -> {
             driverMode = selected;
+            // Crane keys kept accumulating while the crane was locked out, so
+            // leaving driver mode re-armed whatever was being held — the next 20 ms
+            // tick could command the crane while the base was still coasting.
+            // Both directions are neutralised: entering, so nothing is buffered;
+            // leaving, so the operator has to press again against a live crane.
+            operatorInput.releaseAllKeys();
+            drivingKeys.clear();
             view3d.setDriverMode(selected);
             if (selected) {
                 foldSequencer.cancel();      // no automation while driving

@@ -1,6 +1,31 @@
 # Crane Serial Protocol v1 (CSP/1)
 
-> **Revision 1.1.** The `HI` handshake now carries each axis's declared travel (§3.2),
+> ## What this protocol is not
+>
+> **CSP is a control link, not a safety system, and passing its handshake is not
+> commissioning.** Read this before wiring it to anything that moves.
+>
+> - It binds nothing but axis *names* and *declared travel*. It does not verify
+>   crane identity, units, demand-to-actuator scaling, velocities, or geometry. A
+>   crane reporting degrees while the profile means millimetres passes cleanly.
+> - Host-side limit enforcement over telemetry as slow as 10 Hz **cannot** guarantee
+>   physical travel limits or stopping distance. A 100 ms feedback gap at full speed
+>   is a long way on a real axis. The host stops the crane late, by design, because
+>   it is the wrong place to be doing this.
+> - The only mandatory firmware protection here is a watchdog. That is enough to
+>   stop a runaway when the link dies; it is not enough to keep an axis inside its
+>   mechanical stops.
+>
+> **The travel limits, the end stops, and the emergency stop belong on the machine.**
+> The firmware should enforce its own limits and refuse demands that would exceed
+> them, and the emergency stop should remove motor power through hardware that does
+> not depend on any processor agreeing to it. Treat the limits this host enforces as
+> a second opinion and an operator convenience, never as the thing standing between
+> the machine and its stops.
+>
+> ## Revision 1.1
+>
+> The `HI` handshake now carries each axis's declared travel (§3.2),
 > and the host's telemetry gate is specified rather than left to the driver (§4). Both
 > changes exist because CSP puts position-limit enforcement on the host, which only works
 > if the host can (a) prove the loaded profile matches the machine and (b) tell when it
@@ -67,7 +92,7 @@ firmware should treat repeated `HELLO`s as harmless (always re-reply).
 ### 3.2 `HI <name> <axisList>` — crane → host (session accept)
 
 ```
-HI KB5 slew:-180:180,boom:-5:75,jib:0:150,extension:0:6,winch:0:20 *4A
+HI KB5 slew:-180:180,boom:-5:75,jib:0:150,extension:0:6,winch:0:20 *7B
 ```
 
 - `<name>`: a single token (no spaces) identifying the crane, e.g. a model code.
@@ -110,9 +135,15 @@ D 00042 slew:0.500 boom:-0.250 winch:0.000 *10
 - A demand outside [-1, +1], a malformed number, or a malformed pair invalidates the
   **whole line** (drop and count, keep previous demands).
 - Axes the firmware does not know: ignore the pair, keep the rest of the line.
-- Axes missing from a `D` line: keep the previously commanded demand. The host always
-  sends **every** profile axis on every line precisely because of this rule — an omitted
-  axis would otherwise keep running on whatever it was last told.
+- Axes missing from a `D` line: keep the previously commanded demand. The host sends
+  **every axis the crane declared in its `HI`** on every line precisely because of this
+  rule — not merely every profile axis. An axis the loaded profile does not drive would
+  otherwise hold its last demand for the whole session while the watchdog stayed happy,
+  since any valid `D` line pets it. Switching from a five-axis profile to a three-axis
+  one could leave the two dropped axes running.
+
+  > Firmware should not rely on the host getting this right. Treat any axis you have not
+  > been given a demand for in the last watchdog period as commanded to zero.
 
 **Safety on the wire.** Demands are already safety-filtered by the host core (E-STOP
 latch, deadman, watchdog, clamping, ramp limiting all run host-side). The protocol

@@ -53,6 +53,12 @@ public final class SerialCraneDriver implements CraneDriver {
     private final String label;
 
     private volatile CraneProfile profile;
+    /**
+     * Every axis the crane declared in its HI, profile axes first. Demands are
+     * written for all of them so an axis this profile does not drive cannot sit
+     * holding an old value — see {@link #sendDemands}.
+     */
+    private volatile List<String> craneAxisIds = List.of();
     /** Null until the crane has reported a complete position set — never fabricated. */
     private volatile DriverState latest;
     private final AtomicLong lastTelemetryNanos = new AtomicLong(-1);
@@ -88,12 +94,20 @@ public final class SerialCraneDriver implements CraneDriver {
             return;
         }
         link.open();
+        List<String> declaredAxes;
         try {
-            verifyProfileAgainstCrane(newProfile, handshake());
+            CspCodec.Hi hi = handshake();
+            verifyProfileAgainstCrane(newProfile, hi);
+            // Profile axes first so the wire order stays familiar, then anything
+            // else the crane offers, so every one of them gets an explicit zero.
+            List<String> ordered = new java.util.ArrayList<>(newProfile.axisIds());
+            hi.axisIds().stream().filter(id -> !ordered.contains(id)).forEach(ordered::add);
+            declaredAxes = List.copyOf(ordered);
         } catch (RuntimeException e) {
             link.close();
             throw e;
         }
+        craneAxisIds = declaredAxes;
 
         // No fabricated positions. Until the crane has told us where it is, there
         // is no state to read and no motion is permitted; pretending every axis is
@@ -146,13 +160,17 @@ public final class SerialCraneDriver implements CraneDriver {
         boolean fresh = isTelemetryFresh();
         telemetryLost.set(!fresh);
 
-        // Every profile axis, every line. CSP says an omitted axis keeps its
-        // previous demand, so a caller passing a partial map would silently leave
-        // the axes it left out running at whatever they were last told.
+        // Every axis the CRANE declared, every line — not just the profile's.
+        // CSP says an omitted axis keeps its previous demand, and the firmware
+        // watchdog is petted by any valid D line, so a crane with axes this profile
+        // does not drive would hold them at whatever they were last told for as
+        // long as the session lasts. Switching from a five-axis profile to a
+        // three-axis one could leave jib and extension running if the final zero
+        // was the line that got corrupted.
         Map<String, Double> outgoing = new LinkedHashMap<>();
-        for (AxisSpec axis : profile.axes()) {
-            double demand = axisDemands.getOrDefault(axis.id(), 0.0);
-            outgoing.put(axis.id(), fresh && Double.isFinite(demand) ? demand : 0.0);
+        for (String axisId : craneAxisIds) {
+            double demand = axisDemands.getOrDefault(axisId, 0.0);
+            outgoing.put(axisId, fresh && Double.isFinite(demand) ? demand : 0.0);
         }
         try {
             link.writeLine(CspCodec.encodeDemands(sequence.getAndIncrement(), outgoing));
@@ -162,10 +180,13 @@ public final class SerialCraneDriver implements CraneDriver {
                 fault.compareAndSet(null, TELEMETRY_FAULT);
             }
         } catch (SerialLinkException e) {
-            // A write failure is the operator's problem, not stderr's. Repeated
-            // stack traces from a 50 Hz loop hid the one line that mattered.
+            // Recorded, NOT rethrown. Rethrowing aborted the tick before the loop
+            // could publish the fault, so a dead port froze the HMI on its last
+            // healthy frame — the operator watching a still picture of a crane
+            // they had lost contact with. It also aborted profile switching during
+            // teardown, stranding the session. The alarm list is the right channel;
+            // the loop keeps running and keeps reporting.
             fault.set("link failed: " + e.getMessage());
-            throw e;
         }
     }
 

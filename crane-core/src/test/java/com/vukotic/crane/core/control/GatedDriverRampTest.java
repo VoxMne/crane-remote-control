@@ -109,6 +109,48 @@ class GatedDriverRampTest {
         assertTrue(state.deadmanHeld());
     }
 
+    /**
+     * The case the first version of this test missed: gating from a <b>saturated</b>
+     * output, not from rest.
+     *
+     * <p>Suppressing the command only made safety ramp its remembered output down.
+     * From 1.0, one closed 20 ms tick at a ramp rate of 2.0/s still left 0.96 — so a
+     * dropout shorter than the ramp transmitted zero on the wire and then almost
+     * full demand the instant telemetry returned. A gated link is not a controlled
+     * stop; it is no link, and the remembered output has to go with it.
+     */
+    @Test
+    void aBriefDropoutFromFullDemandStillRecoversThroughTheRamp() {
+        GateableDriver driver = new GateableDriver();
+        driver.ready = true;
+        ControlLoop loop = new ControlLoop(profile, driver, new SafetyController(profile));
+
+        // Wind all the way up to full demand with the gate open.
+        long now = 1_000;
+        for (int i = 0; i < 100; i++) {
+            loop.submitCommand(fullSlew(now));
+            loop.tick(now, 0.02);
+            now += 20;
+        }
+        assertEquals(1.0, driver.lastDemands.get("slew"), 1e-9, "should be saturated");
+
+        // One single gated tick — a dropout far shorter than the ramp-down time.
+        driver.ready = false;
+        loop.submitCommand(fullSlew(now));
+        loop.tick(now, 0.02);
+        now += 20;
+        assertEquals(0.0, driver.lastDemands.get("slew"), "gated: nothing on the wire");
+
+        // Telemetry returns. This must be one ramp step from zero, not 0.96.
+        driver.ready = true;
+        loop.submitCommand(fullSlew(now));
+        loop.tick(now, 0.02);
+        double recovered = driver.lastDemands.get("slew");
+
+        assertTrue(recovered <= 2.0 * 0.02 + 1e-9,
+                "recovery from a brief dropout must ramp from zero, was " + recovered);
+    }
+
     @Test
     void aGatedDriverStillLetsAnEmergencyStopThrough() {
         GateableDriver driver = new GateableDriver();

@@ -53,7 +53,15 @@ public final class SafetyController {
     /** Filtered output of the previous tick, per axis id — the ramp-limiter memory. */
     private final Map<String, Double> lastOutput = new LinkedHashMap<>();
 
-    private boolean estopLatched;
+    /**
+     * Volatile because the latch crosses threads whatever the rest of this class
+     * does. {@link #engageEstopLatch()} is called from the UI thread during a
+     * session swap, and {@link #isEstopLatched()} is read there too, while the
+     * control loop writes it every tick. A plain field left that a data race with
+     * no happens-before edge — the UI could engage a latch the loop never observed.
+     * The ramp memory below stays loop-confined; only the latch is shared.
+     */
+    private volatile boolean estopLatched;
 
     public SafetyController(CraneProfile profile) {
         this(profile, DEFAULT_WATCHDOG_TIMEOUT_MILLIS);
@@ -103,9 +111,38 @@ public final class SafetyController {
      * @param nowMillis     current wall-clock time, for command freshness
      * @return filtered demands (one entry per profile axis) plus safety status
      */
+    /**
+     * Forces the ramp-limiter memory to zero.
+     *
+     * <p>For a link that has gone away, not for a stop. A controlled stop ramps;
+     * a gate that has shut means the outgoing demands are no longer reaching
+     * anything, so the remembered output is fiction and must not be the base the
+     * next tick ramps up from.
+     */
+    public void forceOutputToZero() {
+        lastOutput.replaceAll((id, value) -> 0.0);
+    }
+
+    /** Legacy entry point: judges reset eligibility on the same command it filters. */
     public SafetyOutput filter(CraneCommand command, Map<String, Double> axisPositions,
                                double dtSeconds, long nowMillis) {
+        return filter(command, command, axisPositions, dtSeconds, nowMillis);
+    }
+
+    /**
+     * Runs one safety pass.
+     *
+     * @param command    the command to filter, after any assist shaping
+     * @param rawCommand the operator's unshaped command, used <b>only</b> to judge
+     *                   whether a reset is allowed. Assists can zero a held control
+     *                   or inject demand into a neutral one, and neither should be
+     *                   able to decide whether the operator's controls are at rest.
+     */
+    public SafetyOutput filter(CraneCommand command, CraneCommand rawCommand,
+                               Map<String, Double> axisPositions,
+                               double dtSeconds, long nowMillis) {
         Objects.requireNonNull(command, "command");
+        Objects.requireNonNull(rawCommand, "rawCommand");
         Objects.requireNonNull(axisPositions, "axisPositions");
         if (dtSeconds < 0) {
             throw new IllegalArgumentException("dtSeconds must not be negative");
@@ -125,8 +162,8 @@ public final class SafetyController {
         // fresh command with all raw demands neutral and the deadman released.
         if (command.estopRequested()) {
             estopLatched = true;
-        } else if (estopLatched && command.resetRequested()
-                && !watchdogTripped && command.allNeutral() && !command.deadmanHeld()) {
+        } else if (estopLatched && rawCommand.resetRequested()
+                && !watchdogTripped && rawCommand.allNeutral() && !rawCommand.deadmanHeld()) {
             estopLatched = false;
         }
 

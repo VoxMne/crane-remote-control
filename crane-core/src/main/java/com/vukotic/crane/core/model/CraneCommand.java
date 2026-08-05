@@ -56,6 +56,21 @@ public record CraneCommand(
         return new CraneCommand(timestampMillis, zeros(profile), false, estopRequested, false);
     }
 
+    /**
+     * This command with the reset request dropped, demands untouched.
+     *
+     * <p>Used where a reset must not be honoured but the operator's actual control
+     * positions still matter — judging whether the controls are at neutral has to
+     * read what the operator is really doing, while the decision to accept a reset
+     * at all can be refused for separate reasons.
+     */
+    public CraneCommand withResetSuppressed() {
+        return resetRequested
+                ? new CraneCommand(timestampMillis, axisDemands, deadmanHeld,
+                        estopRequested, false)
+                : this;
+    }
+
     private static Map<String, Double> zeros(CraneProfile profile) {
         Map<String, Double> zeros = new LinkedHashMap<>();
         profile.axes().forEach(axis -> zeros.put(axis.id(), 0.0));

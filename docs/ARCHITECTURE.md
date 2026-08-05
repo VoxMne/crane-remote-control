@@ -288,8 +288,10 @@ Frozen public API for the UI: `setCameraMode`/`cameraMode`, `setCargo`/`cargo`.
 Module `crane-driver-serial`: `SerialCraneDriver` implements the `CraneDriver` port over
 the Crane Serial Protocol v1 (docs/PROTOCOL.md) — checksummed ASCII lines at 115200 8N1,
 `HELLO`/`HI` handshake with axis verification, `D` demand lines per tick, `T` telemetry
-parsed on a reader thread. Corrupted lines are dropped and counted; stale telemetry is
-exposed via `millisSinceLastTelemetry()` and never blocks the demand path. The transport
+parsed on a reader thread. Corrupted lines are dropped and counted. Stale telemetry
+**does** block the demand path: `acceptsMotion()` reports false, the control loop
+suppresses motion before the safety layer and forces the ramp memory to zero, and the
+wire carries zeros until a complete, finite, sequence-advancing frame returns. The transport
 sits behind the `SerialLink` seam (`JSerialCommLink` for real COM ports, an in-memory
 fake in tests), so all protocol logic is tested without hardware. The safety layer stays
 host-side: the wire carries no E-STOP/deadman flags — zero demands are the stop, and the

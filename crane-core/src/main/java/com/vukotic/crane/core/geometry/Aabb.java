@@ -64,6 +64,7 @@ public record Aabb(Vec3 min, Vec3 max) {
         double length = b.minus(a).length();
         int samples = Math.max(SEGMENT_SAMPLES,
                 (int) Math.ceil(length / MAX_SAMPLE_SPACING));
+        double spacing = samples == 0 ? 0 : length / samples;
         double closest = Double.MAX_VALUE;
         for (int i = 0; i <= samples; i++) {
             double t = (double) i / samples;
@@ -73,7 +74,12 @@ public record Aabb(Vec3 min, Vec3 max) {
                 return 0;
             }
         }
-        return closest;
+        // Sampling can only ever MISS the true closest point, so this estimate is
+        // biased high — the one direction a clearance figure must not be wrong in.
+        // Between two samples the true distance cannot be less than the estimate
+        // minus half the spacing, so that is what is reported: an under-estimate,
+        // which fails towards stopping rather than towards driving on.
+        return Math.max(0.0, closest - spacing / 2);
     }
 
     private static final int SEGMENT_SAMPLES = 24;

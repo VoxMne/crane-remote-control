@@ -204,16 +204,40 @@ public final class ControlLoop {
      * @return the state published this tick
      */
     public CraneState tick(long nowMillis, double dtSeconds) {
-        CraneCommand command = latestCommand.get();
+        CraneCommand rawCommand = latestCommand.get();
+        CraneCommand command = rawCommand;
+
+        // Positions are read BEFORE the safety pass, not after it. Reading them
+        // afterwards meant the first tick following a telemetry gap was filtered
+        // against the cached (or placeholder) positions from before the gap: if the
+        // recovered frame said an axis was already at its limit, one outward
+        // command went out before that limit was known.
+        Map<String, Double> positions = driver.isConnected()
+                ? driver.readState().axisPositions()
+                : lastKnownPositions;
+        if (positions == null) {
+            positions = latestState.get().axisPositions();
+        }
+        lastKnownPositions = positions;
 
         // A driver that cannot carry motion right now (a serial link with stale or
-        // unverifiable telemetry) suppresses it HERE, before safety, so the ramp
-        // limiter stays parked at zero while the gate is shut. Suppressing it only
-        // on the wire let the safety layer wind up to full demand behind the
-        // driver's back, and the first good telemetry frame then stepped the
-        // machine from standstill to 1.0 in a single tick.
+        // unverifiable telemetry) suppresses it HERE, before safety, and the ramp
+        // limiter is FORCED to zero rather than allowed to ramp down towards it.
+        // Ramping down still left 0.96 after one closed 20 ms tick from full
+        // demand, so a brief dropout — shorter than the ramp — recovered from wire
+        // zero to nearly full demand in a single tick. A gated link is not a
+        // controlled stop; it is no link, and the remembered output must go with it.
         if (!driver.acceptsMotion()) {
             command = command.withMotionSuppressed(profile);
+            // The reset goes too, but the raw DEMANDS stay: neutrality is still
+            // judged on what the operator's controls are really doing, while the
+            // reset itself is refused because nobody can confirm the machine's
+            // state through a link that is not talking. Two separate rules, and
+            // they have to compose — dropping the reset via withMotionSuppressed
+            // alone stopped working the moment eligibility began reading the raw
+            // command, which is exactly what the regression test caught.
+            rawCommand = rawCommand.withResetSuppressed();
+            safety.forceOutputToZero();
         }
 
         // Assist chain (smoothing, anti-sway, ...) reshapes raw demands first;
@@ -242,14 +266,13 @@ public final class ControlLoop {
             }
         }
 
-        Map<String, Double> positions = lastKnownPositions;
-        if (positions == null) {
-            positions = driver.isConnected()
-                    ? driver.readState().axisPositions()
-                    : latestState.get().axisPositions();
-        }
-
-        SafetyOutput safetyOutput = safety.filter(command, positions, dtSeconds, nowMillis);
+        // Reset eligibility is judged on the RAW operator command, never on what
+        // the assists made of it. A collision guard zeroing a held control would
+        // otherwise let RESET through with the operator's lever still displaced,
+        // and anti-sway injecting a correction would refuse a genuinely neutral
+        // one. "Every control at neutral" is a statement about the operator.
+        SafetyOutput safetyOutput =
+                safety.filter(command, rawCommand, positions, dtSeconds, nowMillis);
         driver.sendDemands(safetyOutput.filteredDemands());
         DriverState driverState = driver.readState();
         lastKnownPositions = driverState.axisPositions();
