@@ -315,6 +315,20 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       `allNeutral()` rejects non-finite; failed serial connect keeps the simulator field
 - [x] DONE — CI (`.github/workflows/build.yml`) with Gradle wrapper checksum validation
 
+## V3.5.0 — production build (JavaFX only)
+- [x] DONE — jMonkeyEngine viewer reverted. The 2D schematic is the working instrument
+      and the 3D view is presentation; a second process with its own GL context is
+      complexity this product does not need. The finding is kept for the record: jME
+      3.6.1 does run on a plain Intel UHD laptop at 60 fps with directional shadow
+      mapping, so the option is real if the graphics ever have to step up
+- [x] DONE — `CraneGeometry.forProfile()` no longer refuses cranes by extension range.
+      Boom extension is a parameter of the shape, not a different shape, and the earlier
+      6 m cut-off silently switched interference protection off on the bundled Heavy
+      profile — the one most likely to be demoed
+- [x] DONE — The safety panel states whether interference protection is active for the
+      selected crane. A protection the operator believes in but which is watching
+      nothing is worse than none
+
 ## Known limits (honest scope)
 - Collision covers the **arm** against the cab, deck, ground and set-down loads, and the
   **rope, hook and load** against the deck, the cab roof, the headboard and each other.

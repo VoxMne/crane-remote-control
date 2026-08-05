@@ -55,26 +55,27 @@ public record CraneGeometry(
     }
 
     /**
-     * The longest boom this geometry can describe, i.e. how far the standard
-     * loader's extension may run before the shape stops being this shape.
-     */
-    public static final double STANDARD_MAX_EXTENSION = 6.0;
-
-    /**
      * The geometry for a profile, or empty when there is none we can vouch for.
      *
      * <p>Interference protection is only meaningful against the machine's real
      * dimensions. Every backend used to install {@link #standardLoaderCrane()}
-     * regardless of profile, so a crane with different reach was guarded against a
-     * shape it does not have — and the HMI still advertised the protection as
-     * active. An unverifiable profile now gets no guard at all, which is honest,
-     * and the UI is expected to say so.
+     * regardless of profile, so a crane the shape does not describe was guarded
+     * against the wrong body — and the HMI still advertised the protection as
+     * active. A profile this geometry cannot articulate now gets no guard at all,
+     * and the UI says so rather than showing a protection that is watching nothing.
      *
-     * <p>The check is deliberately narrow: this geometry describes a 5 m boom with
-     * a 3 m jib on a specific truck, so a profile only matches when its named axes
-     * exist and its extension cannot take the boom beyond what the shape models.
-     * Carrying geometry inside {@code CraneProfile} is the real fix and is on the
-     * backlog; until then, refusing to guess is the safe half of it.
+     * <p>The test is which axes the profile declares, not how far they travel.
+     * Boom extension is a <em>parameter</em> of this shape — {@link #boomTip} and
+     * {@link #jibTip} both take it — so a long-reach crane on the same truck is
+     * described perfectly well; an earlier version of this method also refused
+     * anything past 6 m of extension, which silently switched the guard off on the
+     * bundled Heavy profile for no good reason.
+     *
+     * <p>Residual risk, and the reason the backlog still carries "geometry inside
+     * CraneProfile": a custom profile that happens to use these axis names on a
+     * physically different machine is still guarded against this truck. Axis names
+     * are the strongest signal available until a profile can carry its own
+     * dimensions.
      */
     public static java.util.Optional<CraneGeometry> forProfile(
             com.vukotic.crane.core.model.CraneProfile profile) {
@@ -83,12 +84,6 @@ public record CraneGeometry(
             if (profile.axisById(required).isEmpty()) {
                 return java.util.Optional.empty();
             }
-        }
-        double extension = profile.axisById("extension")
-                .map(com.vukotic.crane.core.model.AxisSpec::maxPosition)
-                .orElse(0.0);
-        if (extension > STANDARD_MAX_EXTENSION) {
-            return java.util.Optional.empty();
         }
         return java.util.Optional.of(standardLoaderCrane());
     }

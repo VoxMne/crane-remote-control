@@ -1492,6 +1492,18 @@ public final class CraneRemoteApp extends Application {
         panel.getChildren().add(lampRow(deadmanLamp, "DEADMAN HELD"));
         panel.getChildren().add(lampRow(watchdogLamp, "WATCHDOG TRIPPED"));
 
+        // Interference protection needs geometry for THIS machine. When there is
+        // none, the guard is genuinely absent, and the panel has to say so — a
+        // protection the operator believes in but which is watching nothing is
+        // worse than no protection at all.
+        Label interference = new Label(backend.hasInterferenceProtection()
+                ? "Interference protection active"
+                : "NO interference protection — this crane has no verified geometry");
+        interference.setWrapText(true);
+        interference.setStyle("-fx-font-size: 11px; -fx-text-fill: "
+                + (backend.hasInterferenceProtection() ? TEXT_DIM : "#e2a33c") + ";");
+        panel.getChildren().add(interference);
+
         panel.getChildren().add(sectionLabel("TELEMETRY"));
         recordButton = new ToggleButton("REC");
         recordButton.setFocusTraversable(false);
