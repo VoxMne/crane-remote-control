@@ -4,7 +4,7 @@ plugins {
 
 allprojects {
     group = "com.vukotic.crane"
-    version = "3.4.2"
+    version = "3.4.3"
 }
 
 subprojects {

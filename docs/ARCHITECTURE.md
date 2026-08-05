@@ -198,6 +198,23 @@ Still a simplification, and worth saying out loud: this steers loads, it does no
 resolve contacts. A load whose *centre* is off the bed goes to the ground and may
 still clip the deck edge on the way past.
 
+## The demo paces itself to the crane (V3.4.3)
+`RUN DEMO` synthesises operator input, and it used to hold each key for a hard-coded
+number of seconds — which silently assumed the demo crane's axis speeds. Pick Heavy
+Knuckle-Boom, whose boom moves at 5°/s instead of 8°/s, and six seconds of boom
+reached 28.7° instead of ~57°: the jib tip stopped short of the deck, the load was
+set on the ground behind the truck, and the truck then drove away while the caption
+said "with the load aboard".
+
+Hold times now come from the active profile (`maxVelocity`, `commandRampRate`) and
+the steps are laid out on a running cursor rather than at fixed absolute times. A
+crane with no `boom` or `winch` axis — one built in the profile editor — falls back
+to the old fixed durations rather than failing.
+
+Rule of thumb for anything else scripted against the crane: **drive to a position,
+never for a duration.** Durations encode one machine's speeds, and the whole product
+claim is that the machine is data.
+
 ## 3D view landmines (learned the hard way)
 - **`SubScene.setFill(...)` must be a solid `Color`.** With a `LinearGradient` fill the
   SubScene's buffer is never cleared between frames, so moving geometry (boom, hook,

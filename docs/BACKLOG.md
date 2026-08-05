@@ -273,6 +273,18 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - [x] DONE — Tests extended: the reported placement (hook at x = 5.84 with a 4.2 m boat)
       must end up clear of both the headboard and the mast
 
+## V3.4.3 — the demo missed the deck on any crane but the demo crane
+- [x] DONE — RUN DEMO held each key for a hard-coded number of seconds, which silently
+      assumed the demo crane's axis speeds. On Heavy Knuckle-Boom (boom 5°/s instead of
+      8°/s) six seconds of boom reached only 28.7°, the jib tip stopped ~0.9 m behind the
+      deck, and the load was set on the ground — then the truck drove away while the
+      caption said "with the load aboard". Hold times are now derived from the selected
+      profile's `maxVelocity`/`commandRampRate` and the steps are laid out on a running
+      cursor, so a slower crane takes longer instead of stopping short
+- [x] DONE — The load selector said "Load: None" while the demo had a container on the
+      hook; `applyCargo()` now re-points the selector
+- [x] DONE — Copy no longer promises "40 seconds", because the length is now the crane's
+
 ## Known limits (honest scope)
 - Collision covers the **arm** against the cab, deck, ground and set-down loads, and the
   **rope, hook and load** against the deck, the cab roof, the headboard and each other.

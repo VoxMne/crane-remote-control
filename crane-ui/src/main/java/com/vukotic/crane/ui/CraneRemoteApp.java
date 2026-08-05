@@ -165,6 +165,7 @@ public final class CraneRemoteApp extends Application {
     /** 3D camera/cargo choices: kept here so they survive profile switches. */
     private CameraMode cameraChoice = CameraMode.ORBIT;
     private CargoType cargoChoice = CargoType.NONE;
+    private ComboBox<CargoType> cargoSelector;
 
     // Weather: survives profile/driver switches; only the simulator models it.
     private volatile SimulatedCraneDriver simulator;
@@ -689,8 +690,9 @@ public final class CraneRemoteApp extends Application {
         demoButton.getStyleClass().add("primary-button");
         demoButton.setFocusTraversable(false);
         demoButton.setTooltip(new Tooltip(
-                "Plays a narrated 40-second sequence: hook a load, set it on the truck, "
-                        + "drive away, and trip the emergency stop."));
+                "Plays a narrated sequence: hook a load, set it on the truck, drive away, "
+                        + "and trip the emergency stop. It paces itself to the selected "
+                        + "crane's axis speeds, so a slower machine simply takes longer."));
         demoButton.selectedProperty().addListener((obs, was, selected) -> {
             if (selected) {
                 startDemo();
@@ -748,46 +750,87 @@ public final class CraneRemoteApp extends Application {
         demoTimeline.play();
     }
 
+    /**
+     * Boom angle that puts the jib tip over the middle of the deck. The arm reaches
+     * 8 m from the slew axis (5 m boom + 3 m jib), so the tip lands 8·cos(angle)
+     * out — about 4.4 m at 57°, comfortably inside the 6.15 m deck.
+     */
+    private static final double DECK_DROP_BOOM_DEG = 57.0;
+    /** Rope paid out during the demo; the winch clamp stops it on the deck. */
+    private static final double DEMO_ROPE_OUT_METRES = 9.0;
+
+    /**
+     * Seconds to hold a key to move an axis by {@code amount} of its own unit,
+     * with an allowance for the command ramp.
+     *
+     * <p>The demo used to hold each key for a hard-coded number of seconds, which
+     * silently assumed the demo crane's axis speeds. On the heavy profile — boom
+     * 5°/s instead of 8°/s — six seconds of boom only reached 28°, the jib tip
+     * stopped a metre behind the deck, and the load was set on the ground. The
+     * truck then drove away while the caption said "with the load aboard". A demo
+     * has to work on whichever crane the customer picked from the list.
+     */
+    private double holdSeconds(String axisId, double amount, double fallback) {
+        return profile.axisById(axisId)
+                .map(axis -> Math.clamp(
+                        Math.abs(amount) / axis.maxVelocity() + 1.0 / axis.commandRampRate(),
+                        1.0, 20.0))
+                .orElse(fallback);
+    }
+
     /** The original pitch: hook a load, set it on the deck, drive away. */
     private List<javafx.animation.KeyFrame> loadingScenario() {
+        double boomNow = backend.latestState().position("boom");
+        double boomHold = holdSeconds("boom", DECK_DROP_BOOM_DEG - boomNow, 6.0);
+        double winchHold = holdSeconds("winch", DEMO_ROPE_OUT_METRES, 6.0);
+
+        // Laid out on a running cursor rather than at fixed times, so a slower
+        // crane simply takes longer instead of stopping short.
+        double raise = 3.0;
+        double payOut = raise + boomHold;
+        double down = payOut + winchHold;
+        double drive = down + 5.0;
+        double estop = drive + 7.0;
+        double closing = estop + 6.0;
+
         return List.of(
                 frameAt(0.2, () -> showCaption(
                         "A container hangs on the hook. Nothing moves yet — the crane "
                                 + "only responds while the operator holds the deadman.")),
-                frameAt(3.0, () -> {
+                frameAt(raise, () -> {
                     showCaption("Deadman held. Raising the main boom.");
                     operatorInput.keyPressed("SPACE");
                     operatorInput.keyPressed("W");
                 }),
-                frameAt(9.0, () -> {
+                frameAt(payOut, () -> {
                     showCaption("Paying out the winch to set the load on the truck's own deck.");
                     operatorInput.keyReleased("W");
                     operatorInput.keyPressed("T");
                 }),
-                frameAt(15.0, () -> {
+                frameAt(down, () -> {
                     showCaption("Load down. The arm cannot be driven into the truck, the "
                             + "ground or anything standing nearby — interference protection "
                             + "stops the axis first.");
                     operatorInput.keyReleased("T");
                 }),
-                frameAt(20.0, () -> {
+                frameAt(drive, () -> {
                     showCaption("Driver mode: the crane is locked out completely and the "
                             + "truck can be driven away with the load aboard.");
                     operatorInput.keyReleased("SPACE");
                     driverModeButton.setSelected(true);
                     drivingKeys.add(KeyCode.UP);
                 }),
-                frameAt(27.0, () -> {
+                frameAt(estop, () -> {
                     showCaption("Emergency stop: latches instantly, and stays latched until "
                             + "it is reset with every control at neutral.");
                     drivingKeys.remove(KeyCode.UP);
                     driverModeButton.setSelected(false);
                     estopButton.setSelected(true);
                 }),
-                frameAt(33.0, () -> showCaption(
+                frameAt(closing, () -> showCaption(
                         "The same software drives a simulator or real hardware — the crane "
                                 + "is reached only through a driver interface.")),
-                frameAt(39.0, this::stopDemo));
+                frameAt(closing + 6.0, this::stopDemo));
     }
 
     /** Shows the assists earning their keep: wind, sway, anti-sway, hook camera. */
@@ -978,7 +1021,7 @@ public final class CraneRemoteApp extends Application {
         detail.setWrapText(true);
         detail.setMaxWidth(560);
 
-        Button demo = new Button("Watch the 40-second demo");
+        Button demo = new Button("Watch the narrated demo");
         demo.getStyleClass().addAll("welcome-button", "primary-button");
         demo.setMaxWidth(320);
         demo.setOnAction(event -> {
@@ -1490,13 +1533,22 @@ public final class CraneRemoteApp extends Application {
             cargoChoice = box.getValue();
             applyCargo();
         });
+        cargoSelector = box;
         return box;
     }
 
-    /** Both views show the same load, so switching 2D/3D never changes the hook. */
+    /**
+     * Both views show the same load, so switching 2D/3D never changes the hook.
+     * The selector is re-pointed too: the demo puts a container on the hook, and
+     * a panel still reading "Load: None" next to a visible container is the kind
+     * of detail a buyer notices.
+     */
     private void applyCargo() {
         view2d.setCargo(cargoChoice);
         view3d.setCargo(cargoChoice);
+        if (cargoSelector != null && cargoSelector.getValue() != cargoChoice) {
+            cargoSelector.setValue(cargoChoice);
+        }
     }
 
     /**
