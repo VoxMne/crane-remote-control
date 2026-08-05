@@ -329,6 +329,20 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       selected crane. A protection the operator believes in but which is watching
       nothing is worse than none
 
+## V3.5.1 — self-review before manual testing
+- [x] DONE — The safety lamps read the **live** machine, not the displayed state. During
+      replay they were showing the recording's flags, so a recording made with the
+      deadman held lit DEADMAN HELD next to a crane that was doing nothing
+- [x] DONE — "RUN ENABLED" read the raw key state, so holding SPACE against a latched
+      E-STOP lit it green beside the latch. It now means *the crane will move*, and reads
+      "E-STOP LATCHED — PRESS RESET" when it will not. This was on the audit's list and
+      the earlier fix only covered the header pill, not this indicator
+- [x] DONE — RESET checked the latch immediately, before the control loop could act on
+      it, so every **successful** reset also logged a warning about why it might have
+      failed. Now re-checked after the loop has had a tick, and only a genuine refusal
+      is reported
+- [x] DONE — Arrow keys drove the truck during replay, under a recorded crane
+
 ## Known limits (honest scope)
 - Collision covers the **arm** against the cab, deck, ground and set-down loads, and the
   **rope, hook and load** against the deck, the cab roof, the headboard and each other.

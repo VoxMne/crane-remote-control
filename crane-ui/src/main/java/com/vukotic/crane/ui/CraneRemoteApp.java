@@ -1198,10 +1198,20 @@ public final class CraneRemoteApp extends Application {
             estopRequested = false;
             estopButton.setSelected(false);
             operatorInput.requestReset();     // one-shot reset in the next command
-            if (backend.latestState().estopLatched()) {
-                recordEvent("RESET requested — the latch clears only with every "
-                        + "control at neutral and the deadman released");
-            }
+            // Report a REFUSED reset, and only a refused one. Checking immediately
+            // always found the latch still set — the reset needs a control tick to
+            // be seen — so every successful reset also logged a warning about why
+            // it might have failed. A panel that cries wolf on the good path stops
+            // being read on the bad one.
+            javafx.animation.PauseTransition settle =
+                    new javafx.animation.PauseTransition(javafx.util.Duration.millis(200));
+            settle.setOnFinished(done -> {
+                if (backend.latestState().estopLatched()) {
+                    recordEvent("RESET refused — the latch clears only with every "
+                            + "control at neutral and the deadman released");
+                }
+            });
+            settle.play();
         });
 
         deadmanIndicator = new Label("HOLD SPACE TO RUN");
@@ -1964,10 +1974,18 @@ public final class CraneRemoteApp extends Application {
 
     /** Feeds the arrow keys to the truck; only has an effect in driver mode. */
     private void updateDriving() {
-        double throttle = (drivingKeys.contains(KeyCode.UP) ? 1 : 0)
-                - (drivingKeys.contains(KeyCode.DOWN) ? 1 : 0);
-        double steer = (drivingKeys.contains(KeyCode.RIGHT) ? 1 : 0)
-                - (drivingKeys.contains(KeyCode.LEFT) ? 1 : 0);
+        // Not while a recording is on screen. Crane commands are already suppressed
+        // during replay, but the arrow keys drove the truck straight through it —
+        // so the scene showed a recorded crane on a truck the operator was moving
+        // live underneath it, which is a picture of nothing that ever happened.
+        double throttle = 0;
+        double steer = 0;
+        if (!replaying) {
+            throttle = (drivingKeys.contains(KeyCode.UP) ? 1 : 0)
+                    - (drivingKeys.contains(KeyCode.DOWN) ? 1 : 0);
+            steer = (drivingKeys.contains(KeyCode.RIGHT) ? 1 : 0)
+                    - (drivingKeys.contains(KeyCode.LEFT) ? 1 : 0);
+        }
         view3d.setDriveInput(throttle, steer);
 
         if (driverInfo != null) {
@@ -1999,11 +2017,26 @@ public final class CraneRemoteApp extends Application {
             profile.axisById("slew")
                     .ifPresent(axis -> drawSlewDial(axis, state.position("slew")));
         }
-        estopLamp.setFill(state.estopLatched() ? Color.web(ALARM_RED) : LAMP_OFF);
-        deadmanLamp.setFill(state.deadmanHeld() ? Color.web(OK_GREEN) : LAMP_OFF);
-        watchdogLamp.setFill(state.watchdogTripped() ? Color.web(ALARM_RED) : LAMP_OFF);
-        deadmanIndicator.setStyle(deadmanStyle(operatorInput.deadmanHeld()));
-        deadmanIndicator.setText(operatorInput.deadmanHeld() ? "RUN ENABLED" : "HOLD SPACE TO RUN");
+        // Safety lamps always read the LIVE machine, never `state`: during replay
+        // `state` is the recording's, and a lamp reporting a recording's calm while
+        // the crane in front of you is latched is the worst thing this panel could
+        // do. The axis readouts above may show the past; these three may not.
+        CraneState live = backend.latestState();
+        estopLamp.setFill(live.estopLatched() ? Color.web(ALARM_RED) : LAMP_OFF);
+        deadmanLamp.setFill(live.deadmanHeld() ? Color.web(OK_GREEN) : LAMP_OFF);
+        watchdogLamp.setFill(live.watchdogTripped() ? Color.web(ALARM_RED) : LAMP_OFF);
+
+        // "RUN ENABLED" means the crane will move, not that a key is down. It used
+        // to read the raw key state, so holding SPACE against a latched E-STOP lit
+        // a green RUN ENABLED beside it — the machine was going nowhere and the HMI
+        // said otherwise.
+        boolean running = live.deadmanHeld() && !live.estopLatched();
+        deadmanIndicator.setStyle(deadmanStyle(running));
+        if (live.estopLatched()) {
+            deadmanIndicator.setText("E-STOP LATCHED — PRESS RESET");
+        } else {
+            deadmanIndicator.setText(running ? "RUN ENABLED" : "HOLD SPACE TO RUN");
+        }
 
         if (!alarmItems.equals(state.activeAlarms())) {
             alarmItems.setAll(state.activeAlarms());

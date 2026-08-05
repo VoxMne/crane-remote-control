@@ -51,7 +51,7 @@ runtime {
         installerName = "CraneRemoteControl"
         // jpackage rejects a leading 0 in MSI versions, so the package version
         // stays 1.x even while the project is 0.x.
-        appVersion = "3.5.0"
+        appVersion = "3.5.1"
         installerType = "msi"
         installerOptions = listOf(
                 "--vendor", "Vukotic",
