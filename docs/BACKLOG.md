@@ -285,6 +285,36 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
       hook; `applyCargo()` now re-points the selector
 - [x] DONE — Copy no longer promises "40 seconds", because the length is now the crane's
 
+## V3.5.0 — safety hardening from the second external audit
+- [x] DONE — **B1** E-STOP survived being rebuilt: the latch now travels from the outgoing
+      `SafetyController` (`engageEstopLatch()`), not from the UI toggle that gets rebuilt
+      unselected. Two dropdown switches used to clear it. RESET no longer looks successful
+      when the core refused it
+- [x] DONE — **B2** Suppressed commands drop `resetRequested` as well as the demands, for
+      replay / driver mode / UI stall alike; `stopReplay()` releases held keys before
+      re-arming so SPACE-plus-axis cannot go live on the next tick
+- [x] DONE — **B3** `profile` + `input` + `backend` are one immutable `Session` behind one
+      volatile reference; the command thread reads it once
+- [x] DONE — **B4** CSP/1.1: the crane declares per-axis travel and the host verifies the
+      profile fits inside it. A crane that declares nothing is refused
+- [x] DONE — **B5** A telemetry frame counts only with every profile axis present, finite,
+      and an advancing sequence. No fabricated positions before the first real frame
+- [x] DONE — **B6** `CraneDriver.acceptsMotion()`; the control loop suppresses motion before
+      safety so the ramp cannot wind up behind a gated link
+- [x] DONE — **B7** `CraneGeometry.forProfile()` returns empty for a crane it cannot vouch
+      for, and the guard is then absent rather than guarding the wrong shape
+- [x] DONE — `Aabb` sample spacing scales with segment length (0.35 m gaps on a 17 m boom
+      vs a 0.15 m clearance); obstacle list swapped atomically instead of clear()+addAll()
+- [x] DONE — Assists sanitised on input as well as output; a throwing filter no longer
+      swallows the tick carrying E-STOP; driver faults reach the alarm list
+- [x] DONE — 3D physics steps every frame, so selecting 2D no longer freezes the truck,
+      falling loads and the obstacle set
+- [x] DONE — Camera + cargo selectors follow programmatic changes; user profiles shadow
+      bundled ones by id; telemetry filenames sanitised; replay seeks by binary search
+- [x] DONE — `AxisSpec` rejects non-finite limits; `CraneCommand.neutral()` is monotonic;
+      `allNeutral()` rejects non-finite; failed serial connect keeps the simulator field
+- [x] DONE — CI (`.github/workflows/build.yml`) with Gradle wrapper checksum validation
+
 ## Known limits (honest scope)
 - Collision covers the **arm** against the cab, deck, ground and set-down loads, and the
   **rope, hook and load** against the deck, the cab roof, the headboard and each other.
@@ -295,6 +325,13 @@ Statuses: `TODO` / `DOING` / `DONE`. Agents: set DOING when you start, DONE when
 - Graphics are at the JavaFX ceiling: no shadow mapping, no PBR, no post-processing.
   A `CraneSceneView` implementation on jMonkeyEngine/libGDX could lift that without
   touching the control or safety code — a deliberate future option, not scheduled.
+- **Not safe for real hardware yet.** The serial path has never met a physical crane;
+  `CraneGeometry` is still one modelled machine rather than data carried by the profile,
+  so interference protection is simply absent for a crane it cannot vouch for; and no
+  cable-pull, firmware or GPU-capture testing has been possible here.
+- `CraneRemoteApp` (~2 kLOC) and `Crane3DView` (~1.6 kLOC) want splitting, and no test
+  exercises `CraneRemoteApp` itself — the cross-module tests go through
+  `ControlLoopBackend` instead.
 
 ## Saved for later (V2 items 8-24)
 - LMI + capacity charts · outriggers/tipping · hydraulic realism · wind · 2-axis sway

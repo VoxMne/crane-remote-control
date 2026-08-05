@@ -42,8 +42,16 @@ public final class CollisionGuardFilter implements DemandFilter {
 
     private final CraneProfile profile;
     private final CraneGeometry geometry;
-    /** Loads standing in the world, registered by whatever is tracking them. */
-    private final List<Aabb> loadObstacles = new CopyOnWriteArrayList<>();
+    /**
+     * Loads standing in the world, registered by whatever is tracking them.
+     *
+     * <p>Swapped as one immutable list, not mutated in place. It used to be a
+     * {@code CopyOnWriteArrayList} updated with {@code clear()} then
+     * {@code addAll()}, so the control thread — reading it 50 times a second —
+     * could catch the empty gap between the two and let a tick through with
+     * nothing to avoid.
+     */
+    private volatile List<Aabb> loadObstacles = List.of();
 
     private volatile boolean blocking;
 
@@ -57,8 +65,7 @@ public final class CollisionGuardFilter implements DemandFilter {
      * caller owns load tracking; the guard only needs their boxes.
      */
     public void setLoadObstacles(List<Aabb> loads) {
-        loadObstacles.clear();
-        loadObstacles.addAll(loads);
+        loadObstacles = List.copyOf(loads);
     }
 
     /** True when the guard is currently holding at least one axis back. */

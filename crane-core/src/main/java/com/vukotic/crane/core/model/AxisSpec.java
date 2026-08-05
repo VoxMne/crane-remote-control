@@ -26,6 +26,13 @@ public record AxisSpec(
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException("axis id must not be blank");
         }
+        // Non-finite numbers slip past every comparison below: NaN makes each of
+        // them false, so a NaN limit or ramp rate used to build a perfectly
+        // "valid" axis whose limits nothing could ever be outside of.
+        requireFinite(id, "minPosition", minPosition);
+        requireFinite(id, "maxPosition", maxPosition);
+        requireFinite(id, "maxVelocity", maxVelocity);
+        requireFinite(id, "commandRampRate", commandRampRate);
         if (maxPosition <= minPosition) {
             throw new IllegalArgumentException(
                     "axis '%s': maxPosition (%s) must be greater than minPosition (%s)"
@@ -39,8 +46,22 @@ public record AxisSpec(
         }
     }
 
-    /** Clamps a physical position to this axis' limits. */
+    private static void requireFinite(String id, String field, double value) {
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException(
+                    "axis '%s': %s must be a finite number, was %s".formatted(id, field, value));
+        }
+    }
+
+    /**
+     * Clamps a physical position to this axis' limits. A non-finite position is
+     * not a position: it reads as the axis being at its lower limit, which is the
+     * conservative answer for a limit check.
+     */
     public double clampPosition(double position) {
+        if (!Double.isFinite(position)) {
+            return minPosition;
+        }
         return Math.clamp(position, minPosition, maxPosition);
     }
 }

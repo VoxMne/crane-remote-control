@@ -1,10 +1,16 @@
 # Crane Remote Control
 
 Universal hydraulic crane control software — Java 21 + JavaFX operator HMI with a pluggable
-crane back-end (v1: built-in simulator; later: real hardware via serial/CAN drivers).
+crane back-end. Ships with a simulator and a serial driver speaking CSP/1.1
+(`docs/PROTOCOL.md`); a crane is described by a JSON profile, not by code.
 
-> Safety note: this is a development platform, simulator and HMI. It must never drive a real
-> crane without certified safety hardware (hardwired E-STOP, hold-to-run) in the loop.
+> **Safety note.** This is a development platform, simulator and HMI. It must never drive a
+> real crane without certified safety hardware (hardwired E-STOP, hold-to-run) in the loop.
+>
+> The serial path has been hardened against two external audits but **has never been
+> connected to a physical crane**, and interference protection is still bound to one
+> modelled machine rather than to the loaded profile. See `docs/BACKLOG.md` §Known limits
+> before pointing this at anything that can move.
 
 ## Quick start
 

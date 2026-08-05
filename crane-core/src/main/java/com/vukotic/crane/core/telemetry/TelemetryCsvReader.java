@@ -43,20 +43,30 @@ public final class TelemetryCsvReader {
         /**
          * The frame that was current {@code elapsedMillis} into the recording.
          * Returns the last frame once the recording has run out.
+         *
+         * <p>Binary search, not a scan. This is called once per rendered frame, so
+         * scanning from the beginning made playback cost grow with how far into the
+         * recording you were — a 50 Hz recording of a few minutes is hundreds of
+         * thousands of comparisons per frame by the end.
          */
         public CraneState frameAt(long elapsedMillis) {
             if (frames.isEmpty()) {
                 throw new IllegalStateException("empty recording");
             }
             long target = frames.get(0).timestampMillis() + elapsedMillis;
-            CraneState chosen = frames.get(0);
-            for (CraneState frame : frames) {
-                if (frame.timestampMillis() > target) {
-                    break;
+            int low = 0;
+            int high = frames.size() - 1;
+            int chosen = 0;
+            while (low <= high) {
+                int mid = (low + high) >>> 1;
+                if (frames.get(mid).timestampMillis() <= target) {
+                    chosen = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
                 }
-                chosen = frame;
             }
-            return chosen;
+            return frames.get(chosen);
         }
     }
 

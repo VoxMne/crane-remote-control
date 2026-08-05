@@ -198,6 +198,7 @@ public final class CraneRemoteApp extends Application {
     private boolean use3d;
     /** 3D camera/cargo choices: kept here so they survive profile switches. */
     private CameraMode cameraChoice = CameraMode.ORBIT;
+    private ComboBox<CameraMode> cameraSelector;
     private CargoType cargoChoice = CargoType.NONE;
     private ComboBox<CargoType> cargoSelector;
 
@@ -311,10 +312,17 @@ public final class CraneRemoteApp extends Application {
                     return;
                 }
                 updateDriving();
-                // Tell the interference guard where any set-down load is standing.
+                // The 3D view owns the truck and load physics, so it is stepped
+                // every frame whether or not it is the one on screen. Only the
+                // active view used to be updated, so switching to 2D froze the
+                // truck mid-drive, froze falling loads, and left the interference
+                // guard reading obstacle positions that had stopped moving.
+                view3d.update(profile, state);
                 backend.setLoadObstacles(view3d.loadObstacles());
                 updateReadouts(command, state);
-                activeView.update(profile, state);
+                if (activeView != view3d) {
+                    activeView.update(profile, state);
+                }
             }
         };
         frameTimer.start();
@@ -787,8 +795,7 @@ public final class CraneRemoteApp extends Application {
 
         cargoChoice = CargoType.CONTAINER;
         applyCargo();
-        cameraChoice = CameraMode.ORBIT;
-        view3d.setCameraMode(cameraChoice);
+        applyCamera(CameraMode.ORBIT);
         if (!use3d) {
             showView3d();
         }
@@ -891,8 +898,7 @@ public final class CraneRemoteApp extends Application {
                 frameAt(0.2, () -> {
                     showCaption("Placing a load precisely, in wind. First without any "
                             + "assistance.");
-                    view3d.setCameraMode(CameraMode.HOOK);
-                    cameraChoice = CameraMode.HOOK;
+                    applyCamera(CameraMode.HOOK);
                     windSpeed = 12;
                     windFromDeg = 90;
                     applyWind();
@@ -1581,7 +1587,21 @@ public final class CraneRemoteApp extends Application {
             cameraChoice = box.getValue();
             view3d.setCameraMode(cameraChoice);
         });
+        cameraSelector = box;
         return box;
+    }
+
+    /**
+     * Points the 3D view at a camera and keeps the selector in step. The demo
+     * switches to the hook camera directly, and the panel went on reading
+     * "Camera: Orbit" beside an obviously different viewpoint.
+     */
+    private void applyCamera(CameraMode mode) {
+        cameraChoice = mode;
+        view3d.setCameraMode(mode);
+        if (cameraSelector != null && cameraSelector.getValue() != mode) {
+            cameraSelector.setValue(mode);
+        }
     }
 
     /** Load on the hook — visual only, it does not affect the simulation. */
@@ -1654,8 +1674,11 @@ public final class CraneRemoteApp extends Application {
                 .showAndSave()
                 .ifPresent(file -> {
                     recordEvent("Saved crane profile " + file.getFileName());
-                    String fileName = file.getFileName().toString();
-                    reloadCatalogAndSelect(fileName.substring(0, fileName.lastIndexOf('.')));
+                    // Select by the id inside the file, not by the file name. The
+                    // writer sanitises the id into the name, so a crane called
+                    // "my crane" was written as my_crane.json and then looked up
+                    // under an id that does not exist — silently no selection.
+                    reloadCatalogAndSelect(file);
                 });
     }
 
@@ -1663,11 +1686,20 @@ public final class CraneRemoteApp extends Application {
      * Re-reads the profiles folder and switches to the named crane, so an edit is
      * driveable immediately without restarting.
      */
-    private void reloadCatalogAndSelect(String profileId) {
+    private void reloadCatalogAndSelect(Path savedFile) {
+        String profileId;
+        try {
+            profileId = new com.vukotic.crane.core.model.CraneProfileLoader()
+                    .load(savedFile).id();
+        } catch (RuntimeException e) {
+            recordEvent("Saved profile could not be re-read: " + e.getMessage());
+            profileId = profile.id();
+        }
         catalog.clear();
         catalog.addAll(ProfileCatalog.available());
+        String wanted = profileId;
         catalog.stream()
-                .filter(candidate -> candidate.id().equals(profileId))
+                .filter(candidate -> candidate.id().equals(wanted))
                 .findFirst()
                 .ifPresentOrElse(this::activateProfile, () -> activateProfile(profile));
     }
@@ -1835,8 +1867,13 @@ public final class CraneRemoteApp extends Application {
     // ---- telemetry ----
 
     private void startTelemetry() {
+        // Sanitised the same way profile files are: a crane id is operator-supplied
+        // text, and it was going into a path unescaped, outside the try block that
+        // would have caught the resulting failure.
+        String safeId = profile.id().replaceAll("[^A-Za-z0-9._-]", "_");
         Path file = AppPaths.telemetry().resolve("telemetry-%s-%s.csv"
-                .formatted(profile.id(), LocalDateTime.now().format(FILE_STAMP)));
+                .formatted(safeId.isBlank() ? "crane" : safeId,
+                        LocalDateTime.now().format(FILE_STAMP)));
         try {
             telemetryLogger = new TelemetryCsvLogger(file, profile);
             backend.addStateListener(telemetryLogger);

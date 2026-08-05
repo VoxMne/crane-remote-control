@@ -11,7 +11,9 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * All crane profiles the app can drive: the built-in demo, the bundled JSON
@@ -58,6 +60,13 @@ public final class ProfileCatalog {
                 System.err.println("[profiles] cannot scan " + userDir + ": " + e.getMessage());
             }
         }
-        return List.copyOf(profiles);
+
+        // A user file wins over the built-in of the same id. "Edit" on a bundled
+        // crane writes a user copy under that same id, and the catalog listed both
+        // — with the built-in first, so selecting the edit silently reactivated the
+        // original and the operator's changes appeared to have been ignored.
+        Map<String, CraneProfile> byId = new LinkedHashMap<>();
+        profiles.forEach(candidate -> byId.put(candidate.id(), candidate));
+        return List.copyOf(byId.values());
     }
 }
