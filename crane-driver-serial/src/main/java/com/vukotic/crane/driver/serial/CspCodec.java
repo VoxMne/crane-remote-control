@@ -48,14 +48,54 @@ public final class CspCodec {
         }
     }
 
-    /** A parsed {@code HI} line: crane name + the axis ids the crane can drive. */
-    public record Hi(String craneName, List<String> axisIds) {
+    /** The travel a crane declares for one axis, in that axis's physical unit. */
+    public record AxisLimits(double minPosition, double maxPosition) {
+        public AxisLimits {
+            if (!Double.isFinite(minPosition) || !Double.isFinite(maxPosition)
+                    || minPosition >= maxPosition) {
+                throw new IllegalArgumentException(
+                        "limits must be finite with min < max: " + minPosition + ".." + maxPosition);
+            }
+        }
+
+        /** True when {@code [min, max]} lies inside this declared travel. */
+        public boolean contains(double min, double max) {
+            return min >= minPosition - 1e-9 && max <= maxPosition + 1e-9;
+        }
+    }
+
+    /**
+     * A parsed {@code HI} line: crane name, the axis ids the crane can drive, and
+     * — since CSP/1.1 — the travel it declares for each of them.
+     *
+     * <p>The limits matter because CSP puts position-limit enforcement on the host.
+     * A crane that only names its axes cannot tell the host whether the profile it
+     * loaded describes this machine or a bigger one, and the bundled Demo and Heavy
+     * profiles expose exactly the same five axis ids with very different travel.
+     * {@code limits} empty means a CSP/1.0 crane that did not declare any.
+     */
+    public record Hi(String craneName, List<String> axisIds, Map<String, AxisLimits> limits) {
         public Hi {
             axisIds = List.copyOf(axisIds);
+            limits = Map.copyOf(limits);
+        }
+
+        /** A CSP/1.0 reply: axis names only, no declared travel. */
+        public Hi(String craneName, List<String> axisIds) {
+            this(craneName, axisIds, Map.of());
+        }
+
+        public boolean declaresLimits() {
+            return !limits.isEmpty();
         }
     }
 
     // ---------------------------------------------------------------- checksum/frame
+
+    /** A limit value on the wire: two decimals, Locale.ROOT so the point is a point. */
+    private static String decimal(double value) {
+        return String.format(Locale.ROOT, "%.2f", value);
+    }
 
     /** XOR of every character in {@code payload}, as two uppercase hex digits. */
     public static String checksum(String payload) {
@@ -126,7 +166,7 @@ public final class CspCodec {
         return frame("HELLO");
     }
 
-    /** The session-accept line a crane sends (used by tests and crane emulators). */
+    /** A CSP/1.0 session-accept line: axis names only, no declared travel. */
     public static String encodeHi(String craneName, List<String> axisIds) {
         requireToken(craneName, "crane name");
         if (axisIds == null || axisIds.isEmpty()) {
@@ -134,6 +174,31 @@ public final class CspCodec {
         }
         axisIds.forEach(id -> requireToken(id, "axis id"));
         return frame("HI " + craneName + " " + String.join(",", axisIds));
+    }
+
+    /**
+     * A CSP/1.1 session-accept line: each axis with the travel the crane declares.
+     * Used by tests and crane emulators; real firmware sends this so the host can
+     * prove the loaded profile describes the machine actually on the other end.
+     */
+    public static String encodeHi(String craneName, Map<String, AxisLimits> limits) {
+        requireToken(craneName, "crane name");
+        if (limits == null || limits.isEmpty()) {
+            throw new IllegalArgumentException("limits must not be empty");
+        }
+        StringBuilder body = new StringBuilder("HI ").append(craneName).append(' ');
+        boolean first = true;
+        for (Map.Entry<String, AxisLimits> entry : limits.entrySet()) {
+            requireToken(entry.getKey(), "axis id");
+            if (!first) {
+                body.append(',');
+            }
+            first = false;
+            body.append(entry.getKey())
+                    .append(':').append(decimal(entry.getValue().minPosition()))
+                    .append(':').append(decimal(entry.getValue().maxPosition()));
+        }
+        return frame(body.toString());
     }
 
     /**
@@ -233,7 +298,14 @@ public final class CspCodec {
         return Optional.of(new Telemetry(sequence.get(), axes));
     }
 
-    /** Parses a {@code HI} line; empty on any framing, checksum, or field violation. */
+    /**
+     * Parses a {@code HI} line; empty on any framing, checksum, or field violation.
+     *
+     * <p>Accepts both forms. CSP/1.0: {@code HI <name> slew,boom,winch}. CSP/1.1:
+     * {@code HI <name> slew:-180:180,boom:-5:75,winch:0:20} — the same list with
+     * each axis's declared travel appended. Mixing the two forms in one line is
+     * rejected rather than guessed at.
+     */
     public static Optional<Hi> parseHi(String line) {
         Optional<String> body = unframe(line);
         if (body.isEmpty()) {
@@ -243,13 +315,34 @@ public final class CspCodec {
         if (tokens.length != 3 || !tokens[0].equals("HI") || !TOKEN.matcher(tokens[1]).matches()) {
             return Optional.empty();
         }
-        String[] ids = tokens[2].split(",", -1);
-        for (String id : ids) {
-            if (!TOKEN.matcher(id).matches()) {
+        String[] entries = tokens[2].split(",", -1);
+        List<String> ids = new java.util.ArrayList<>(entries.length);
+        Map<String, AxisLimits> limits = new java.util.LinkedHashMap<>();
+        for (String entry : entries) {
+            String[] parts = entry.split(":", -1);
+            if (!TOKEN.matcher(parts[0]).matches()) {
                 return Optional.empty();
             }
+            ids.add(parts[0]);
+            if (parts.length == 1) {
+                continue;                       // CSP/1.0 form: no declared travel
+            }
+            if (parts.length != 3
+                    || !DECIMAL.matcher(parts[1]).matches()
+                    || !DECIMAL.matcher(parts[2]).matches()) {
+                return Optional.empty();
+            }
+            try {
+                limits.put(parts[0], new AxisLimits(
+                        Double.parseDouble(parts[1]), Double.parseDouble(parts[2])));
+            } catch (IllegalArgumentException e) {
+                return Optional.empty();        // min >= max, or non-finite
+            }
         }
-        return Optional.of(new Hi(tokens[1], List.of(ids)));
+        if (!limits.isEmpty() && limits.size() != ids.size()) {
+            return Optional.empty();            // half-declared travel is not a contract
+        }
+        return Optional.of(new Hi(tokens[1], ids, limits));
     }
 
     // ----------------------------------------------------------------------- helpers

@@ -44,15 +44,29 @@ public record Aabb(Vec3 min, Vec3 max) {
     }
 
     /**
+     * Longest gap allowed between samples along a segment, in metres. Chosen well
+     * below the collision guard's 0.15 m clearance so the sampling error cannot
+     * consume the margin.
+     */
+    private static final double MAX_SAMPLE_SPACING = 0.05;
+
+    /**
      * Approximate distance from the segment {@code a→b} to this box, found by
-     * sampling along the segment. {@value #SEGMENT_SAMPLES} samples over a boom
-     * a few metres long put the sampling error well below the safety margin the
-     * collision guard already applies.
+     * sampling along it.
+     *
+     * <p>The sample count scales with length. A fixed {@value #SEGMENT_SAMPLES}
+     * samples is fine on a 5 m boom, but the bundled Heavy profile extends to 17 m,
+     * where the same count leaves 0.35 m between samples — more than twice the
+     * clearance the guard is trying to enforce, so a thin obstacle could pass
+     * clean between two samples and be reported as no obstacle at all.
      */
     public double distanceToSegment(Vec3 a, Vec3 b) {
+        double length = b.minus(a).length();
+        int samples = Math.max(SEGMENT_SAMPLES,
+                (int) Math.ceil(length / MAX_SAMPLE_SPACING));
         double closest = Double.MAX_VALUE;
-        for (int i = 0; i <= SEGMENT_SAMPLES; i++) {
-            double t = (double) i / SEGMENT_SAMPLES;
+        for (int i = 0; i <= samples; i++) {
+            double t = (double) i / samples;
             Vec3 point = a.plus(b.minus(a).scaled(t));
             closest = Math.min(closest, distanceTo(point));
             if (closest == 0) {

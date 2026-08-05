@@ -167,6 +167,14 @@ public final class ControlLoop {
         stateListeners.remove(listener);
     }
 
+    /** Replaces null and non-finite demands with neutral, leaving the rest alone. */
+    private static Map<String, Double> sanitised(Map<String, Double> demands) {
+        Map<String, Double> clean = new LinkedHashMap<>();
+        demands.forEach((id, value) ->
+                clean.put(id, value != null && Double.isFinite(value) ? value : 0.0));
+        return clean;
+    }
+
     /** Scheduled-thread entry point: derives real time, then delegates to tick(). */
     private void scheduledTick() {
         try {
@@ -198,17 +206,40 @@ public final class ControlLoop {
     public CraneState tick(long nowMillis, double dtSeconds) {
         CraneCommand command = latestCommand.get();
 
+        // A driver that cannot carry motion right now (a serial link with stale or
+        // unverifiable telemetry) suppresses it HERE, before safety, so the ramp
+        // limiter stays parked at zero while the gate is shut. Suppressing it only
+        // on the wire let the safety layer wind up to full demand behind the
+        // driver's back, and the first good telemetry frame then stepped the
+        // machine from standstill to 1.0 in a single tick.
+        if (!driver.acceptsMotion()) {
+            command = command.withMotionSuppressed(profile);
+        }
+
         // Assist chain (smoothing, anti-sway, ...) reshapes raw demands first;
         // the safety layer below remains the final authority on what goes out.
+        // A throwing filter must not be able to swallow the tick: E-STOP and the
+        // deadman ride on this same command, so a broken assist falls back to the
+        // unshaped command rather than skipping safety altogether.
         List<DemandFilter> filters = demandFilters;
         if (!filters.isEmpty()) {
             CraneState last = latestState.get();
-            Map<String, Double> shaped = command.axisDemands();
-            for (DemandFilter filter : filters) {
-                shaped = filter.apply(shaped, last, dtSeconds);
+            // Sanitised going IN as well as coming out. The safety layer maps a
+            // non-finite demand to zero, but an assist handed an infinity can
+            // legitimately clamp it to a finite +1 — turning a nonsense input into
+            // full-speed motion that safety then sees as perfectly valid.
+            Map<String, Double> shaped = sanitised(command.axisDemands());
+            try {
+                for (DemandFilter filter : filters) {
+                    shaped = filter.apply(shaped, last, dtSeconds);
+                }
+                command = new CraneCommand(command.timestampMillis(), sanitised(shaped),
+                        command.deadmanHeld(), command.estopRequested(),
+                        command.resetRequested());
+            } catch (RuntimeException e) {
+                System.err.println("[control-loop] assist filter failed, "
+                        + "falling back to unshaped demands: " + e);
             }
-            command = new CraneCommand(command.timestampMillis(), shaped,
-                    command.deadmanHeld(), command.estopRequested(), command.resetRequested());
         }
 
         Map<String, Double> positions = lastKnownPositions;
@@ -223,6 +254,14 @@ public final class ControlLoop {
         DriverState driverState = driver.readState();
         lastKnownPositions = driverState.axisPositions();
 
+        // A driver fault belongs in the operator's alarm list, not on stderr.
+        List<String> alarms = safetyOutput.activeAlarms();
+        java.util.Optional<String> fault = driver.fault();
+        if (fault.isPresent()) {
+            alarms = new java.util.ArrayList<>(alarms);
+            alarms.add(driver.name() + ": " + fault.get());
+        }
+
         CraneState state = new CraneState(
                 nowMillis,
                 driverState.axisPositions(),
@@ -230,7 +269,7 @@ public final class ControlLoop {
                 safetyOutput.estopLatched(),
                 safetyOutput.deadmanEffective(),
                 safetyOutput.watchdogTripped(),
-                safetyOutput.activeAlarms());
+                alarms);
         latestState.set(state);
         for (Consumer<CraneState> listener : stateListeners) {
             listener.accept(state);

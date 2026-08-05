@@ -25,11 +25,41 @@ public record CraneCommand(
         axisDemands = Map.copyOf(axisDemands);
     }
 
-    /** All axes neutral, deadman released — the safe default. */
+    /**
+     * All axes neutral, deadman released — the safe default, stamped with the
+     * monotonic clock the watchdog measures against.
+     *
+     * <p>This used to stamp {@link System#currentTimeMillis()}, which the watchdog
+     * does not use: a neutral command therefore looked arbitrarily stale or
+     * arbitrarily fresh depending on the offset between the two clocks.
+     */
     public static CraneCommand neutral(CraneProfile profile) {
+        return neutralAt(profile, com.vukotic.crane.core.MonotonicClock.millis());
+    }
+
+    /** All axes neutral, deadman released, at an explicit timestamp. */
+    public static CraneCommand neutralAt(CraneProfile profile, long timestampMillis) {
+        return new CraneCommand(timestampMillis, zeros(profile), false, false, false);
+    }
+
+    /**
+     * This command with every axis demand zeroed and the deadman released, keeping
+     * only {@code estopRequested}. Used wherever motion has to be suppressed while
+     * an emergency stop must still get through: a gated driver link, a UI that has
+     * stopped proving it is alive, driver mode, a recording on screen.
+     *
+     * <p>{@code resetRequested} is deliberately dropped. A reset is a deliberate
+     * two-handed act by an operator looking at the live machine; it must never ride
+     * along inside a command that was synthesised because something was wrong.
+     */
+    public CraneCommand withMotionSuppressed(CraneProfile profile) {
+        return new CraneCommand(timestampMillis, zeros(profile), false, estopRequested, false);
+    }
+
+    private static Map<String, Double> zeros(CraneProfile profile) {
         Map<String, Double> zeros = new LinkedHashMap<>();
         profile.axes().forEach(axis -> zeros.put(axis.id(), 0.0));
-        return new CraneCommand(System.currentTimeMillis(), zeros, false, false, false);
+        return zeros;
     }
 
     /** Demand for one axis; unknown axes read as neutral. */
@@ -37,8 +67,11 @@ public record CraneCommand(
         return axisDemands.getOrDefault(axisId, 0.0);
     }
 
-    /** True when every axis demand is exactly neutral. */
+    /**
+     * True when every axis demand is exactly neutral. A non-finite demand is not
+     * neutral: it must never be able to satisfy the reset precondition.
+     */
     public boolean allNeutral() {
-        return axisDemands.values().stream().allMatch(d -> d == 0.0);
+        return axisDemands.values().stream().allMatch(d -> d != null && d == 0.0);
     }
 }

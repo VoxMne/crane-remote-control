@@ -30,13 +30,41 @@ public final class ControlLoopBackend implements CraneBackend {
 
     private final CraneDriver driver;
     private final ControlLoop loop;
+    private final SafetyController safety;
+    /** Null when no verified geometry exists for this crane — see {@link #hasInterferenceProtection()}. */
     private final CollisionGuardFilter collisionGuard;
 
     public ControlLoopBackend(CraneProfile profile, CraneDriver driver) {
         this.driver = Objects.requireNonNull(driver, "driver");
-        this.loop = new ControlLoop(profile, driver, new SafetyController(profile));
-        this.collisionGuard =
-                new CollisionGuardFilter(profile, CraneGeometry.standardLoaderCrane());
+        this.safety = new SafetyController(profile);
+        this.loop = new ControlLoop(profile, driver, safety);
+        // Interference protection needs to know the machine's actual dimensions.
+        // Every backend used to install the standard loader geometry regardless of
+        // profile, so a crane with different reach was guarded against a shape it
+        // does not have — and the HMI still claimed the protection was active.
+        this.collisionGuard = CraneGeometry.forProfile(profile)
+                .map(geometry -> new CollisionGuardFilter(profile, geometry))
+                .orElse(null);
+    }
+
+    /**
+     * Whether interference protection is real for this crane. False when the
+     * profile has no verified geometry: the guard is then absent rather than
+     * guessing, and the UI must say so instead of showing a protection that is
+     * not watching anything.
+     */
+    public boolean hasInterferenceProtection() {
+        return collisionGuard != null;
+    }
+
+    /** Re-asserts a latched emergency stop onto this session's fresh controller. */
+    public void engageEstopLatch() {
+        safety.engageEstopLatch();
+    }
+
+    /** True while this session's safety controller holds the E-STOP latch. */
+    public boolean isEstopLatched() {
+        return safety.isEstopLatched();
     }
 
     /**
@@ -44,12 +72,14 @@ public final class ControlLoopBackend implements CraneBackend {
      * the arm will not sweep through them.
      */
     public void setLoadObstacles(List<Aabb> loads) {
-        collisionGuard.setLoadObstacles(loads);
+        if (collisionGuard != null) {
+            collisionGuard.setLoadObstacles(loads);
+        }
     }
 
     /** True while interference protection is holding an axis back. */
     public boolean isCollisionBlocking() {
-        return collisionGuard.isBlocking();
+        return collisionGuard != null && collisionGuard.isBlocking();
     }
 
     /** Shown in the status panel, e.g. "Simulator". */
@@ -92,7 +122,10 @@ public final class ControlLoopBackend implements CraneBackend {
         }
         // Interference protection is not optional and runs last, so it vetoes
         // whatever the assists asked for. The safety layer still follows it.
-        chain.add(collisionGuard);
+        // Absent only when this crane has no verified geometry to guard against.
+        if (collisionGuard != null) {
+            chain.add(collisionGuard);
+        }
         loop.setDemandFilters(chain);
     }
 

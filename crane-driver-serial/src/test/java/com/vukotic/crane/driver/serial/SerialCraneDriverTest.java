@@ -23,12 +23,37 @@ class SerialCraneDriverTest {
 
     private final CraneProfile profile = CraneProfiles.demoKnuckleBoom();
 
+    /** A CSP/1.1 crane declaring generous travel on each of the named axes. */
     private static FakeLink linkAnsweringHello(List<String> axes) {
+        Map<String, CspCodec.AxisLimits> limits = new LinkedHashMap<>();
+        axes.forEach(id -> limits.put(id, new CspCodec.AxisLimits(-1_000, 1_000)));
+        return linkAnsweringHello(limits);
+    }
+
+    private static FakeLink linkAnsweringHello(Map<String, CspCodec.AxisLimits> limits) {
+        FakeLink link = new FakeLink();
+        link.respondWith(line -> CspCodec.unframe(line).map(body -> body.equals("HELLO")
+                ? List.of(CspCodec.encodeHi("KB5", limits))
+                : List.<String>of()).orElse(List.of()));
+        return link;
+    }
+
+    /** A CSP/1.0 crane: names its axes, declares no travel. */
+    private static FakeLink linkAnsweringHelloWithoutLimits(List<String> axes) {
         FakeLink link = new FakeLink();
         link.respondWith(line -> CspCodec.unframe(line).map(body -> body.equals("HELLO")
                 ? List.of(CspCodec.encodeHi("KB5", axes))
                 : List.<String>of()).orElse(List.of()));
         return link;
+    }
+
+    /** A complete telemetry frame: every profile axis, as the driver now requires. */
+    private String completeFrame(int sequence, double slew) {
+        Map<String, CspCodec.AxisTelemetry> axes = new LinkedHashMap<>();
+        for (String id : ALL_AXES) {
+            axes.put(id, new CspCodec.AxisTelemetry(id.equals("slew") ? slew : 0.0, 0.0));
+        }
+        return CspCodec.encodeTelemetry(sequence, axes);
     }
 
     /** Polls a condition for up to two seconds (reader thread is asynchronous). */
@@ -74,25 +99,50 @@ class SerialCraneDriverTest {
     }
 
     @Test
-    void telemetryUpdatesStateAndMissingAxesKeepPrevious() {
+    void aCompleteFrameUpdatesEveryAxis() {
         FakeLink link = linkAnsweringHello(ALL_AXES);
         SerialCraneDriver driver = new SerialCraneDriver(link, "Serial (COM7)");
         driver.connect(profile);
 
-        Map<String, CspCodec.AxisTelemetry> first = new LinkedHashMap<>();
-        first.put("slew", new CspCodec.AxisTelemetry(12.5, 1.2));
-        first.put("boom", new CspCodec.AxisTelemetry(45.0, 0.0));
-        link.pushToHost(CspCodec.encodeTelemetry(1, first));
+        link.pushToHost(completeFrame(1, 12.5));
         await("first telemetry", () -> driver.readState().axisPositions().get("slew") == 12.5);
-        assertEquals(45.0, driver.readState().axisPositions().get("boom"));
+        assertTrue(driver.isTelemetryFresh());
+        assertTrue(driver.millisSinceLastTelemetry() < 2_000);
+        driver.disconnect();
+    }
 
-        // Second line carries only slew: boom must keep its previous value.
+    @Test
+    void aPartialFrameIsNotPositionFeedback() {
+        // This used to refresh freshness and let the missing axes keep old values,
+        // so motion was permitted while the position limits guarded stale numbers.
+        FakeLink link = linkAnsweringHello(ALL_AXES);
+        SerialCraneDriver driver = new SerialCraneDriver(link, "Serial (COM7)");
+        driver.connect(profile);
+
+        link.pushToHost(completeFrame(1, 12.5));
+        await("complete frame", driver::isTelemetryFresh);
+
         link.pushToHost(CspCodec.encodeTelemetry(2,
                 Map.of("slew", new CspCodec.AxisTelemetry(20.0, 0.5))));
-        await("second telemetry", () -> driver.readState().axisPositions().get("slew") == 20.0);
-        DriverState state = driver.readState();
-        assertEquals(45.0, state.axisPositions().get("boom"), "missing axis keeps previous");
-        assertTrue(driver.millisSinceLastTelemetry() < 2_000);
+        await("partial frame counted as dropped", () -> driver.droppedLineCount() >= 1);
+        assertEquals(12.5, driver.readState().axisPositions().get("slew"),
+                "a partial frame must not move the reported position");
+        driver.disconnect();
+    }
+
+    @Test
+    void aRepeatedSequenceIsNotLiveness() {
+        FakeLink link = linkAnsweringHello(ALL_AXES);
+        SerialCraneDriver driver = new SerialCraneDriver(link, "Serial (COM7)");
+        driver.connect(profile);
+
+        link.pushToHost(completeFrame(7, 1.0));
+        await("first frame", driver::isTelemetryFresh);
+
+        // Same sequence replayed forever: alive-looking, but says nothing new.
+        link.pushToHost(completeFrame(7, 99.0));
+        await("replayed frame rejected", () -> driver.droppedLineCount() >= 1);
+        assertEquals(1.0, driver.readState().axisPositions().get("slew"));
         driver.disconnect();
     }
 
@@ -103,12 +153,36 @@ class SerialCraneDriverTest {
         driver.connect(profile);
 
         link.pushToHost("T 00003 slew:99.99,0.00 *FF"); // bad checksum
-        link.pushToHost(CspCodec.encodeTelemetry(4,
-                Map.of("slew", new CspCodec.AxisTelemetry(7.0, 0.0))));
+        link.pushToHost(completeFrame(4, 7.0));
         await("good line after corrupt one",
                 () -> driver.readState().axisPositions().get("slew") == 7.0);
-        assertEquals(1, driver.droppedLineCount());
+        assertTrue(driver.droppedLineCount() >= 1);
         driver.disconnect();
+    }
+
+    @Test
+    void connectRefusesACraneThatDeclaresNoTravel() {
+        FakeLink link = linkAnsweringHelloWithoutLimits(ALL_AXES);
+        SerialCraneDriver driver = new SerialCraneDriver(link, "Serial (COM7)");
+        SerialLinkException e = assertThrows(SerialLinkException.class,
+                () -> driver.connect(profile));
+        assertTrue(e.getMessage().contains("CSP/1.0"), e.getMessage());
+        assertFalse(link.isOpen(), "port must be closed after a failed connect");
+    }
+
+    @Test
+    void connectRefusesAProfileWiderThanTheCrane() {
+        // The bundled Demo and Heavy profiles share all five axis ids; only the
+        // declared travel can tell them apart, and getting it wrong drives a small
+        // crane past its stops.
+        Map<String, CspCodec.AxisLimits> small = new LinkedHashMap<>();
+        ALL_AXES.forEach(id -> small.put(id, new CspCodec.AxisLimits(-1, 1)));
+        SerialCraneDriver driver =
+                new SerialCraneDriver(linkAnsweringHello(small), "Serial (COM7)");
+
+        SerialLinkException e = assertThrows(SerialLinkException.class,
+                () -> driver.connect(profile));
+        assertTrue(e.getMessage().contains("wrong profile"), e.getMessage());
     }
 
     @Test
@@ -118,11 +192,28 @@ class SerialCraneDriverTest {
         driver.connect(profile);
 
         Map<String, CspCodec.AxisTelemetry> axes = new LinkedHashMap<>();
-        axes.put("slew", new CspCodec.AxisTelemetry(5.0, 0.0));
+        for (String id : ALL_AXES) {
+            axes.put(id, new CspCodec.AxisTelemetry(id.equals("slew") ? 5.0 : 0.0, 0.0));
+        }
         axes.put("grappleRotator", new CspCodec.AxisTelemetry(1.0, 0.0));
         link.pushToHost(CspCodec.encodeTelemetry(5, axes));
         await("telemetry", () -> driver.readState().axisPositions().get("slew") == 5.0);
         assertFalse(driver.readState().axisPositions().containsKey("grappleRotator"));
+        driver.disconnect();
+    }
+
+    @Test
+    void aFrameOfOnlyUnknownAxesIsNotFeedback() {
+        FakeLink link = linkAnsweringHello(ALL_AXES);
+        SerialCraneDriver driver = new SerialCraneDriver(link, "Serial (COM7)");
+        driver.connect(profile);
+
+        link.pushToHost(CspCodec.encodeTelemetry(9,
+                Map.of("grappleRotator", new CspCodec.AxisTelemetry(1.0, 0.0))));
+        await("rejected", () -> driver.droppedLineCount() >= 1);
+        assertFalse(driver.isTelemetryFresh(),
+                "axes this profile never heard of are not position feedback");
+        assertFalse(driver.acceptsMotion());
         driver.disconnect();
     }
 
@@ -132,8 +223,7 @@ class SerialCraneDriverTest {
         SerialCraneDriver driver = new SerialCraneDriver(link, "Serial (COM7)");
         driver.connect(profile);
         // Feedback first: without it the driver fails closed and sends zeros.
-        link.pushToHost(CspCodec.encodeTelemetry(1,
-                Map.of("slew", new CspCodec.AxisTelemetry(0.0, 0.0))));
+        link.pushToHost(completeFrame(1, 0.0));
         await("telemetry", driver::isTelemetryFresh);
         int before = link.written.size(); // HELLO line(s)
 
@@ -170,8 +260,7 @@ class SerialCraneDriverTest {
         FakeLink link = linkAnsweringHello(ALL_AXES);
         SerialCraneDriver driver = new SerialCraneDriver(link, "Serial (COM7)");
         driver.connect(profile);
-        link.pushToHost(CspCodec.encodeTelemetry(1,
-                Map.of("slew", new CspCodec.AxisTelemetry(0.0, 0.0))));
+        link.pushToHost(completeFrame(1, 0.0));
         await("telemetry", driver::isTelemetryFresh);
 
         int before = link.written.size();

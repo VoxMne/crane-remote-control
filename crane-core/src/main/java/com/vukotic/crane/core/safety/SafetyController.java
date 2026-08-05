@@ -73,6 +73,23 @@ public final class SafetyController {
         return estopLatched;
     }
 
+    /**
+     * Engages the latch directly, without an operator command.
+     *
+     * <p>This exists for one purpose: carrying a latched emergency stop across a
+     * controller replacement. Switching crane profile or driver builds a fresh
+     * controller, and a latch that quietly evaporated because the session was
+     * rebuilt would be the most dangerous bug this program could have.
+     *
+     * <p>Note the asymmetry, and keep it: engaging is always safe, so it is
+     * offered here. There is deliberately no counterpart that clears the latch —
+     * that only ever happens inside {@link #filter} when a fresh command carries a
+     * reset with every demand neutral and the deadman released.
+     */
+    public void engageEstopLatch() {
+        estopLatched = true;
+    }
+
     public long watchdogTimeoutMillis() {
         return watchdogTimeoutMillis;
     }

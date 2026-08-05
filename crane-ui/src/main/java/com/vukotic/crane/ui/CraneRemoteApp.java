@@ -104,11 +104,45 @@ public final class CraneRemoteApp extends Application {
     /** Mutable: the profile editor can add to it without a restart. */
     private final List<CraneProfile> catalog = new ArrayList<>(ProfileCatalog.available());
 
-    // ---- per-profile session, rebuilt by activateProfile() ----
-    // Volatile: swapped on the FX thread, read by the command thread.
+    /**
+     * One crane session: the profile, the input sampler bound to its axes, and the
+     * backend driving it. They are swapped together, as one reference.
+     *
+     * <p>They used to be three independent volatile fields, and the command thread
+     * read them one at a time. A profile switch landing between two of those reads
+     * paired held input from the old session with the new session's backend for one
+     * tick — the operator's fingers driving a crane they had just switched away
+     * from. Making the trio immutable and swapping a single reference removes the
+     * window entirely rather than narrowing it.
+     */
+    private record Session(CraneProfile profile, OperatorInput input,
+                           ControlLoopBackend backend) {
+    }
+
+    /**
+     * Swapped on the FX thread, read by the command thread. Never partially
+     * updated: the command thread reads this reference and nothing else, so it
+     * always sees one coherent session.
+     */
+    private volatile Session session;
+
+    // The same three, for FX-thread code that only ever touches one of them.
+    // Kept in step with `session` by activateProfile().
     private volatile CraneProfile profile;
     private volatile OperatorInput operatorInput;
     private volatile ControlLoopBackend backend;
+
+    /**
+     * The operator's standing E-STOP request — the mushroom button's position.
+     *
+     * <p>Held here rather than read back off the {@code estopButton}, because the
+     * control panel (and with it that button) is rebuilt on every profile or driver
+     * switch. The rebuilt button came up unselected, so the first switch left the
+     * backend latched under an un-pressed button and the second switch believed the
+     * button and built an unlatched controller: an emergency stop cleared by
+     * changing a dropdown twice.
+     */
+    private volatile boolean estopRequested;
 
     /** Fixed-rate operator-command thread — see startCommandThread(). */
     private static final long COMMAND_PERIOD_MILLIS = 20; // 50 Hz
@@ -372,23 +406,27 @@ public final class CraneRemoteApp extends Application {
             while (commandThreadRunning) {
                 long started = System.nanoTime();
                 try {
-                    OperatorInput input = operatorInput;
-                    ControlLoopBackend activeBackend = backend;
-                    CraneProfile activeProfile = profile;
-                    if (input != null && activeBackend != null && activeProfile != null) {
+                    // One read of one reference: profile, input and backend can
+                    // never be mismatched halfway through a session switch.
+                    Session active = session;
+                    if (active != null) {
+                        OperatorInput input = active.input();
+                        ControlLoopBackend activeBackend = active.backend();
+                        CraneProfile activeProfile = active.profile();
                         CraneCommand command = input.snapshot(MonotonicClock.millis());
 
                         // Fail closed if the UI thread stops proving it is alive.
                         // Without this the cached key state would keep producing
                         // freshly-timestamped commands after a UI freeze or a lost
                         // key-release, and the watchdog would never notice.
-                        if (!isUiAlive() || replaying) {
-                            command = neutralWithFlags(activeProfile, command, false);
-                        } else if (driverMode) {
-                            // Crane lockout: the driver is in the cab, not on the
-                            // remote. Safety flags still pass through untouched.
-                            command = neutralWithFlags(activeProfile, command,
-                                    command.deadmanHeld());
+                        if (!isUiAlive() || replaying || driverMode) {
+                            // Motion suppressed, E-STOP still gets through, and the
+                            // reset is dropped. A reset must never ride inside a
+                            // command the program synthesised because the UI stalled,
+                            // a recording is on screen, or the crane is locked out —
+                            // in all three the operator is not looking at the live
+                            // machine with the controls verifiably at neutral.
+                            command = command.withMotionSuppressed(activeProfile);
                         } else if (foldSequencer.isActive()) {
                             command = foldSequencer.next(activeBackend.latestState(), command);
                         }
@@ -445,18 +483,20 @@ public final class CraneRemoteApp extends Application {
      */
     private void activateProfile(CraneProfile newProfile) {
         stopTelemetry();
+        // Ask the outgoing controller whether it was latched BEFORE stopping it.
+        boolean latchWasEngaged = backend != null && backend.isEstopLatched();
         if (backend != null) {
             backend.stop();
         }
 
         profile = newProfile;
         operatorInput = new OperatorInput(keyBindings, profile.axisIds());
-        // A latched emergency stop belongs to the operator, not to a backend
-        // instance. Swapping profile or driver builds a fresh SafetyController,
-        // so the latch is re-asserted here or it would silently disappear.
-        if (estopButton != null && estopButton.isSelected()) {
-            operatorInput.setEstopRequested(true);
-        }
+        // A latched emergency stop belongs to the operator and the machine, not to
+        // a backend instance. Take it from the outgoing controller — the authority
+        // — as well as from the operator's standing request. Reading it off the
+        // E-STOP toggle was the bug: that button is rebuilt below, unselected.
+        boolean carriedLatch = estopRequested || latchWasEngaged;
+        operatorInput.setEstopRequested(estopRequested);
         foldSequencer.cancel(); // never carry an auto-sequence across cranes
         // The status panel (and with it the replay button) is rebuilt below, so
         // any running replay ends here rather than leaving the flag orphaned.
@@ -471,10 +511,22 @@ public final class CraneRemoteApp extends Application {
             recordEvent("driver '" + driverChoice + "' failed: " + e.getMessage()
                     + " — falling back to Simulator");
             driverChoice = DRIVER_SIMULATOR;
-            backend = new ControlLoopBackend(profile, new SimulatedCraneDriver());
+            SimulatedCraneDriver fallback = new SimulatedCraneDriver();
+            // The field, not just a local: the weather controls and the guided demo
+            // both key off it, and leaving it null after a failed serial connect
+            // silently killed wind and made the demo refuse to run.
+            simulator = fallback;
+            fallback.setWind(windSpeed, windFromDeg);
+            backend = new ControlLoopBackend(profile, fallback);
             backend.configureAssists(smoothingOn, antiSwayOn);
             backend.start();
         }
+        if (carriedLatch) {
+            backend.engageEstopLatch();
+        }
+        // Published last and as one reference: until this line the command thread
+        // still sees the previous session, complete and consistent.
+        session = new Session(profile, operatorInput, backend);
 
         demandReadouts.clear();
         positionReadouts.clear();
@@ -969,14 +1021,19 @@ public final class CraneRemoteApp extends Application {
     private void updateStatusPill(CraneState state) {
         String text;
         String style;
-        // Checked first: during replay every flag below belongs to the recording,
-        // not to the machine in front of you. Saying "RUNNING" would be a lie.
-        if (replaying) {
-            text = "REPLAY — RECORDED";
-            style = "pill-warn";
-        } else if (state.estopLatched()) {
+        // The latch is read from the LIVE machine, never from `state`: while a
+        // recording is on screen `state` carries the recording's flags, and the
+        // header would happily report the past as the present.
+        boolean liveLatched = backend.latestState().estopLatched();
+        if (liveLatched) {
+            // Ahead of everything else, replay included: a latched machine is the
+            // most important thing this header can say. The HMI used to be able to
+            // show a green RUN ENABLED beside a latched E-STOP.
             text = "E-STOP LATCHED";
             style = "pill-alarm";
+        } else if (replaying) {
+            text = "REPLAY — RECORDED";
+            style = "pill-warn";
         } else if (demoRunning) {
             text = "DEMO RUNNING";
             style = "pill-warn";
@@ -1110,19 +1167,35 @@ public final class CraneRemoteApp extends Application {
         estopButton.setTooltip(new Tooltip(
                 "Latches immediately: every demand is forced to zero and stays there "
                         + "until RESET, with all controls at neutral. Shortcut: Esc"));
-        estopButton.selectedProperty().addListener((obs, was, selected) ->
-                operatorInput.setEstopRequested(selected));
+        // Restored from the standing request BEFORE the listener is attached, so a
+        // rebuilt panel shows the mushroom where the operator left it and does not
+        // re-fire the request while doing so.
+        estopButton.setSelected(estopRequested);
+        estopButton.selectedProperty().addListener((obs, was, selected) -> {
+            estopRequested = selected;
+            operatorInput.setEstopRequested(selected);
+        });
 
         Button resetButton = new Button("RESET");
         resetButton.setMaxWidth(Double.MAX_VALUE);
         resetButton.setFocusTraversable(false);
         resetButton.getStyleClass().add("primary-button");
         resetButton.setTooltip(new Tooltip(
-                "Clears a latched emergency stop — only accepted with every control "
-                        + "at neutral and the deadman released."));
+                "Releases the emergency stop and asks the safety layer to clear the "
+                        + "latch — accepted only with every control at neutral and the "
+                        + "deadman released. If it is refused, the latch stays on."));
         resetButton.setOnAction(event -> {
-            estopButton.setSelected(false);   // clears the E-STOP request
+            // Releasing the mushroom is the operator's act and takes effect now.
+            // Clearing the LATCH is the core's decision, and the lamp keeps showing
+            // the core's answer: a refused reset leaves the machine latched, and the
+            // HMI has to keep saying so rather than looking cleared.
+            estopRequested = false;
+            estopButton.setSelected(false);
             operatorInput.requestReset();     // one-shot reset in the next command
+            if (backend.latestState().estopLatched()) {
+                recordEvent("RESET requested — the latch clears only with every "
+                        + "control at neutral and the deadman released");
+            }
         });
 
         deadmanIndicator = new Label("HOLD SPACE TO RUN");
@@ -1731,6 +1804,14 @@ public final class CraneRemoteApp extends Application {
 
     private void stopReplay() {
         recording = null;
+        // Neutralise BEFORE re-arming. Key handlers stayed live during playback, so
+        // an operator holding SPACE and an axis while watching a recording had that
+        // command go live on the first tick after it ended — motion they never
+        // asked the live machine for.
+        if (operatorInput != null) {
+            operatorInput.releaseAllKeys();
+        }
+        drivingKeys.clear();
         replaying = false;
         replayButton.setText("REPLAY A RECORDING");
         replayButton.setSelected(false);

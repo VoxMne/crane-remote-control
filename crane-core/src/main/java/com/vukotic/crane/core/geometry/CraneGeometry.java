@@ -54,6 +54,45 @@ public record CraneGeometry(
                 -2.55, -0.95, 2.3);
     }
 
+    /**
+     * The longest boom this geometry can describe, i.e. how far the standard
+     * loader's extension may run before the shape stops being this shape.
+     */
+    public static final double STANDARD_MAX_EXTENSION = 6.0;
+
+    /**
+     * The geometry for a profile, or empty when there is none we can vouch for.
+     *
+     * <p>Interference protection is only meaningful against the machine's real
+     * dimensions. Every backend used to install {@link #standardLoaderCrane()}
+     * regardless of profile, so a crane with different reach was guarded against a
+     * shape it does not have — and the HMI still advertised the protection as
+     * active. An unverifiable profile now gets no guard at all, which is honest,
+     * and the UI is expected to say so.
+     *
+     * <p>The check is deliberately narrow: this geometry describes a 5 m boom with
+     * a 3 m jib on a specific truck, so a profile only matches when its named axes
+     * exist and its extension cannot take the boom beyond what the shape models.
+     * Carrying geometry inside {@code CraneProfile} is the real fix and is on the
+     * backlog; until then, refusing to guess is the safe half of it.
+     */
+    public static java.util.Optional<CraneGeometry> forProfile(
+            com.vukotic.crane.core.model.CraneProfile profile) {
+        java.util.Objects.requireNonNull(profile, "profile");
+        for (String required : java.util.List.of("slew", "boom", "jib")) {
+            if (profile.axisById(required).isEmpty()) {
+                return java.util.Optional.empty();
+            }
+        }
+        double extension = profile.axisById("extension")
+                .map(com.vukotic.crane.core.model.AxisSpec::maxPosition)
+                .orElse(0.0);
+        if (extension > STANDARD_MAX_EXTENSION) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(standardLoaderCrane());
+    }
+
     /** Boom pivot, at the top of the mast. */
     public Vec3 boomPivot() {
         return new Vec3(0, deckTopY + mastHeight, 0);
