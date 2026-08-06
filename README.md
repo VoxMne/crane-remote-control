@@ -1,16 +1,28 @@
 # Crane Remote Control
 
-Universal hydraulic crane control software — Java 21 + JavaFX operator HMI with a pluggable
-crane back-end. Ships with a simulator and a serial driver speaking CSP/1.1
-(`docs/PROTOCOL.md`); a crane is described by a JSON profile, not by code.
+**A desktop crane operator training system.** Java 21 + JavaFX operator HMI with the same
+controls and the same safety discipline as a real knuckle-boom loader crane: latching
+emergency stop, hold-to-run deadman, command watchdog, position limits and interference
+protection.
 
-> **Safety note.** This is a development platform, simulator and HMI. It must never drive a
-> real crane without certified safety hardware (hardwired E-STOP, hold-to-run) in the loop.
+Runs against a built-in simulator today, or a physical desktop crane over a serial link
+speaking CSP/2 (`docs/PROTOCOL.md`). The machine is described by a JSON profile rather
+than by code, so the same software teaches a three-axis rig or a five-axis one.
+
+**Why it is worth using for training:** every session can be recorded and replayed, and a
+recording carries its own provenance — which crane, which trainee, when, in what units —
+plus a summary of what actually happened: emergency stops tripped, limits driven into,
+time spent moving, and how smoothly the controls were handled. That is the artifact an
+instructor marks.
+
+> **What this is not.** Not certified safety equipment, and not a substitute for
+> supervised time on a real machine. The emergency stop in this software is a software
+> latch; on any physical rig the emergency stop must be a hardware circuit that removes
+> motor power without asking a processor's permission — see `docs/PROTOCOL.md` §0.
 >
-> The serial path has been hardened against two external audits but **has never been
-> connected to a physical crane**, and interference protection is still bound to one
-> modelled machine rather than to the loaded profile. See `docs/BACKLOG.md` §Known limits
-> before pointing this at anything that can move.
+> The serial path has been hardened against three external audits but **has never been
+> connected to physical hardware**. See `docs/BACKLOG.md` §Known limits before pointing it
+> at anything that can move.
 
 ## Quick start
 

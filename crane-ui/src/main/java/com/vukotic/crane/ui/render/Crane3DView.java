@@ -69,6 +69,10 @@ public final class Crane3DView implements CraneSceneView {
     private static final double BOOM_BASE_LENGTH = 5.0;
     private static final double JIB_LENGTH = 3.0;
     private static final double HOOK_BLOCK_HEIGHT = 0.42;
+    /** Half-thickness of the jib beam, for keeping a hanging load off it. */
+    private static final double JIB_RADIUS = 0.13;
+    /** Extra air between a hanging load and the arm it hangs from. */
+    private static final double LOAD_ARM_CLEARANCE = 0.20;
     /** Hook within this of a load's top face picks it up; see {@link #cargoPickupArmed}. */
     private static final double PICKUP_DISTANCE = 0.7;
     /** …but only once the hook has first been taken this far clear of it. */
@@ -566,6 +570,7 @@ public final class Crane3DView implements CraneSceneView {
      */
     private double payableRope(double requested, Point3D jibTip,
                                double swayDeg, double slewDeg) {
+        requested = Math.max(requested, minimumRopeForLoad());
         double tipY = jibTip.getY() - BED_HEIGHT;   // world Y, measured downwards
         double toGround = Math.max(0.0, -tipY - HOOK_GROUND_CLEARANCE);
         double probe = Math.clamp(requested, 0.0, toGround);
@@ -599,6 +604,28 @@ public final class Crane3DView implements CraneSceneView {
         Point3D load = worldToVehicle(restingWorldPosition());
         return Math.abs(point.getX() - load.getX()) < loadHalfExtentX(restingSlewDeg)
                 && Math.abs(point.getZ() - load.getZ()) < loadHalfExtentZ(restingSlewDeg);
+    }
+
+    /**
+     * The shortest rope a hanging load may be carried on.
+     *
+     * <p>A load hangs directly below the hook, and the hook is at the jib tip — so
+     * winching all the way in pulls the load up into the arm. On screen the jib ran
+     * straight through the top of a container. A real crane cannot do this either:
+     * the block reaches the sheave and the load stops, well before the arm.
+     *
+     * <p>The standoff is the load's own half-height plus the arm's radius plus a
+     * margin, less the hook block and sling that already separate them. Enough to
+     * keep the box clear of the beam it hangs from, and short enough that a small
+     * load can still be carried high.
+     */
+    private double minimumRopeForLoad() {
+        if (cargoType == CargoType.NONE || !cargoAttached) {
+            return 0.0;
+        }
+        double standoff = cargoType.height() / 2 + JIB_RADIUS + LOAD_ARM_CLEARANCE;
+        // The hook block and the 0.12 m sling gap already hold the load down.
+        return Math.max(0.0, standoff - (HOOK_BLOCK_HEIGHT + 0.12));
     }
 
     /** Seconds since the previous update, clamped against pauses and hiccups. */

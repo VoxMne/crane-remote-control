@@ -1122,14 +1122,15 @@ public final class CraneRemoteApp extends Application {
         Label title = new Label("Crane Remote Control");
         title.getStyleClass().add("welcome-title");
 
-        Label pitch = new Label("Universal control software for hydraulic loader cranes.");
+        Label pitch = new Label("Crane operator training, on a desktop.");
         pitch.getStyleClass().add("welcome-sub");
 
         Label detail = new Label("""
-                One program drives any crane: the machine is described by a data file,
-                not by code. A full safety layer — latching emergency stop, hold-to-run,
-                watchdog, limits and interference protection — sits between the operator
-                and the machine, whether that machine is this simulator or real hardware.""");
+                The same controls and the same discipline as a real loader crane: a
+                latching emergency stop, hold-to-run, a watchdog, position limits and
+                interference protection sit between the trainee and the machine. Every
+                run can be recorded and played back, with a summary of what happened —
+                emergency stops, limits hit, how smoothly the controls were handled.""");
         detail.getStyleClass().add("welcome-note");
         detail.setWrapText(true);
         detail.setMaxWidth(560);
