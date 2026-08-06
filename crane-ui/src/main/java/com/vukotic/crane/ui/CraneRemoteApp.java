@@ -158,6 +158,9 @@ public final class CraneRemoteApp extends Application {
     /** Stamped by the JavaFX frame loop; proves the UI is still running. */
     private volatile long uiHeartbeatMillis = MonotonicClock.millis();
 
+    /** Command-thread only: tracks the UI-alive edge so recovery needs a fresh press. */
+    private boolean uiWasAlive = true;
+
     private boolean isUiAlive() {
         return MonotonicClock.millis() - uiHeartbeatMillis < UI_HEARTBEAT_TIMEOUT_MILLIS;
     }
@@ -221,6 +224,38 @@ public final class CraneRemoteApp extends Application {
     private final AutoSequencer foldSequencer = new AutoSequencer();
     private boolean smoothingOn;
     private boolean antiSwayOn;
+    private ToggleButton antiSwaySelector;
+    private ToggleButton smoothingSelector;
+    private Slider windSpeedSlider;
+    private ComboBox<String> windDirectionSelector;
+
+    /**
+     * Changes the weather and moves the controls with it. The demo used to set 12
+     * m/s of crosswind straight into the field, leaving the wind slider reading
+     * zero — so the most striking thing on screen had no visible cause, and an
+     * operator who then touched the slider got a jump.
+     */
+    private void setWeather(double speedMps, double fromDeg) {
+        windSpeed = speedMps;
+        windFromDeg = fromDeg;
+        applyWind();
+        if (windSpeedSlider != null) {
+            windSpeedSlider.setValue(speedMps);
+        }
+        if (windDirectionSelector != null) {
+            windDirectionSelector.setValue(
+                    COMPASS_POINTS[(int) Math.round(fromDeg / 45.0) % 8]);
+        }
+    }
+
+    /** Turns an assist on/off and keeps its button in step. */
+    private void setAntiSway(boolean on) {
+        antiSwayOn = on;
+        backend.configureAssists(smoothingOn, antiSwayOn);
+        if (antiSwaySelector != null) {
+            antiSwaySelector.setSelected(on);
+        }
+    }
     private ToggleButton foldButton;
     private Label foldStatus;
 
@@ -427,6 +462,23 @@ public final class CraneRemoteApp extends Application {
                         // Without this the cached key state would keep producing
                         // freshly-timestamped commands after a UI freeze or a lost
                         // key-release, and the watchdog would never notice.
+                        // A UI that went quiet and came back must not hand its
+                        // cached key state straight to the crane. The stall may
+                        // have lasted seconds; whatever was held then is not a
+                        // statement about what the operator wants now, so the keys
+                        // are dropped and they must press again.
+                        if (!isUiAlive()) {
+                            if (uiWasAlive) {
+                                input.releaseAllKeys();
+                                drivingKeys.clear();
+                                uiWasAlive = false;
+                            }
+                        } else if (!uiWasAlive) {
+                            input.releaseAllKeys();
+                            drivingKeys.clear();
+                            uiWasAlive = true;
+                        }
+
                         if (!isUiAlive() || replaying || driverMode) {
                             // Motion suppressed, E-STOP still gets through, and the
                             // reset is dropped. A reset must never ride inside a
@@ -899,9 +951,7 @@ public final class CraneRemoteApp extends Application {
                     showCaption("Placing a load precisely, in wind. First without any "
                             + "assistance.");
                     applyCamera(CameraMode.HOOK);
-                    windSpeed = 12;
-                    windFromDeg = 90;
-                    applyWind();
+                    setWeather(12, 90);
                 }),
                 frameAt(3.0, () -> {
                     operatorInput.keyPressed("SPACE");
@@ -917,8 +967,7 @@ public final class CraneRemoteApp extends Application {
                 frameAt(18.0, () -> {
                     showCaption("Now with ANTI-SWAY: the crane corrects the slew against the "
                             + "measured swing and the load settles in roughly half the time.");
-                    antiSwayOn = true;
-                    backend.configureAssists(smoothingOn, true);
+                    setAntiSway(true);
                     operatorInput.keyPressed("Q");
                 }),
                 frameAt(23.0, () -> operatorInput.keyReleased("Q")),
@@ -1261,6 +1310,8 @@ public final class CraneRemoteApp extends Application {
             antiSwayOn = selected;
             backend.configureAssists(smoothingOn, antiSwayOn);
         });
+        antiSwaySelector = antiSwayToggle;
+        smoothingSelector = smoothToggle;
 
         foldButton = new ToggleButton("FOLD TO TRANSPORT");
         foldButton.setMaxWidth(Double.MAX_VALUE);
@@ -1339,6 +1390,8 @@ public final class CraneRemoteApp extends Application {
         direction.setMaxWidth(Double.MAX_VALUE);
         direction.setFocusTraversable(false);
         direction.setValue(COMPASS_POINTS[(int) Math.round(windFromDeg / 45.0) % 8]);
+        windSpeedSlider = speed;
+        windDirectionSelector = direction;
 
         windInfo = new Label();
         windInfo.setStyle("-fx-text-fill: " + TEXT_DIM + "; -fx-font-size: 11px;");

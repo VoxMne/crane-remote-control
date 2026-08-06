@@ -199,16 +199,20 @@ public final class SafetyController {
             double demand = previous + Math.clamp(target - previous, -maxDelta, maxDelta);
 
             // Rule 6 — position limit stop: outward motion zeroed instantly,
-            // inward motion allowed.
+            // inward motion allowed. An axis whose position is unknown or not a
+            // number gets no motion at all: the limit check cannot be performed, and
+            // "cannot check" must mean "do not move", not "move freely". This used
+            // to fall through and command the axis unguarded.
             Double position = axisPositions.get(id);
-            if (position != null) {
-                if (position >= axis.maxPosition() && demand > 0.0) {
-                    demand = 0.0;
-                    alarms.add(id + " at limit");
-                } else if (position <= axis.minPosition() && demand < 0.0) {
-                    demand = 0.0;
-                    alarms.add(id + " at limit");
-                }
+            if (position == null || !Double.isFinite(position)) {
+                demand = 0.0;
+                alarms.add(id + " position unknown — motion inhibited");
+            } else if (position >= axis.maxPosition() && demand > 0.0) {
+                demand = 0.0;
+                alarms.add(id + " at limit");
+            } else if (position <= axis.minPosition() && demand < 0.0) {
+                demand = 0.0;
+                alarms.add(id + " at limit");
             }
 
             filtered.put(id, demand);

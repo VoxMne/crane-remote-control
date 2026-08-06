@@ -65,6 +65,8 @@ public final class ControlLoop {
 
     private ScheduledExecutorService executor; // guarded by "this"
     private long lastTickNanos = -1;           // loop thread only
+    /** Set before shutdown so an in-flight tick cannot outlive the final zero. */
+    private volatile boolean stopping;
 
     public ControlLoop(CraneProfile profile, CraneDriver driver, SafetyController safety) {
         this(profile, driver, safety, DEFAULT_TICK_HZ);
@@ -115,6 +117,11 @@ public final class ControlLoop {
      * caller's decision.
      */
     public synchronized void stop() {
+        // Latched BEFORE the shutdown so a tick already inside the method bails out
+        // rather than writing demands after the final zero. shutdownNow() only
+        // interrupts; a tick past its interruption check ran to completion and
+        // could put a nonzero demand on the wire as the last thing the crane heard.
+        stopping = true;
         if (executor != null) {
             executor.shutdownNow();
             try {
@@ -271,8 +278,18 @@ public final class ControlLoop {
         // otherwise let RESET through with the operator's lever still displaced,
         // and anti-sway injecting a correction would refuse a genuinely neutral
         // one. "Every control at neutral" is a statement about the operator.
+        //
+        // `nowMillis` is the caller's, which keeps tick() deterministic for tests.
+        // The audit noted it is captured before the driver read and the assist
+        // chain, so a command's measured age is slightly optimistic. Deliberately
+        // left: the gap is a volatile read plus a filter pass — microseconds
+        // against a 250 ms watchdog — and taking the clock here instead would mean
+        // this method could no longer be driven from a test with explicit time.
         SafetyOutput safetyOutput =
                 safety.filter(command, rawCommand, positions, dtSeconds, nowMillis);
+        if (stopping) {
+            return latestState.get();   // the loop is shutting down; stop() sends the zeros
+        }
         driver.sendDemands(safetyOutput.filteredDemands());
         DriverState driverState = driver.readState();
         lastKnownPositions = driverState.axisPositions();

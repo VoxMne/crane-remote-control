@@ -113,8 +113,10 @@ public final class SimulatedCraneDriver implements CraneDriver {
     }
 
     private SimulatedCraneDriver(double timeConstantSeconds, boolean wallClockStepping) {
-        if (timeConstantSeconds <= 0) {
-            throw new IllegalArgumentException("timeConstantSeconds must be positive");
+        if (!Double.isFinite(timeConstantSeconds) || timeConstantSeconds <= 0) {
+            throw new IllegalArgumentException(
+                    "timeConstantSeconds must be a positive finite number, was "
+                            + timeConstantSeconds);
         }
         this.timeConstantSeconds = timeConstantSeconds;
         this.wallClockStepping = wallClockStepping;
@@ -129,8 +131,12 @@ public final class SimulatedCraneDriver implements CraneDriver {
      *                 degrees clockwise from north (0 = northerly, 90 = easterly)
      */
     public void setWind(double speedMps, double fromDeg) {
-        this.windSpeedMps = Math.max(0, speedMps);
-        this.windFromDeg = fromDeg;
+        // Non-finite weather is no weather. A NaN wind speed propagates through the
+        // pendulum into the published load-sway angle, and from there into the
+        // anti-sway filter's correction — one bad number turning an assist into a
+        // demand generator.
+        this.windSpeedMps = Double.isFinite(speedMps) ? Math.max(0, speedMps) : 0.0;
+        this.windFromDeg = Double.isFinite(fromDeg) ? fromDeg : 0.0;
     }
 
     public double windSpeedMps() {
