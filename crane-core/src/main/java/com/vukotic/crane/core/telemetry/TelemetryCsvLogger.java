@@ -36,6 +36,16 @@ public final class TelemetryCsvLogger implements Consumer<CraneState>, AutoClose
 
     /** Creates the file (parent directories included) and writes the header row. */
     public TelemetryCsvLogger(Path file, CraneProfile profile) throws IOException {
+        this(file, profile, null);
+    }
+
+    /**
+     * As above, naming the person at the controls.
+     *
+     * @param operator trainee or operator name, or null to omit it
+     */
+    public TelemetryCsvLogger(Path file, CraneProfile profile, String operator)
+            throws IOException {
         Objects.requireNonNull(file, "file");
         Objects.requireNonNull(profile, "profile");
         this.axisIds = profile.axisIds();
@@ -43,6 +53,25 @@ public final class TelemetryCsvLogger implements Consumer<CraneState>, AutoClose
             Files.createDirectories(file.getParent());
         }
         this.writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
+
+        // Metadata first, on '#' lines. A recording is the assessment artifact for
+        // a training rig, so it has to say on its own which machine it came from,
+        // in what units, and who was driving — a file that only carries numbers is
+        // unmarkable a week later, and cannot be checked against the profile it was
+        // recorded on. Readers skip lines starting with '#'.
+        writeLine("# crane-remote-control telemetry v2");
+        writeLine("# profile=" + profile.id());
+        writeLine("# craneName=" + profile.name());
+        if (operator != null && !operator.isBlank()) {
+            writeLine("# operator=" + operator.replace('\n', ' ').trim());
+        }
+        writeLine("# recorded=" + java.time.ZonedDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+        for (var axis : profile.axes()) {
+            writeLine("# axis=%s unit=%s min=%s max=%s maxVelocity=%s"
+                    .formatted(axis.id(), axis.unit(), axis.minPosition(),
+                            axis.maxPosition(), axis.maxVelocity()));
+        }
 
         StringBuilder header = new StringBuilder("timestampMillis");
         for (String id : axisIds) {

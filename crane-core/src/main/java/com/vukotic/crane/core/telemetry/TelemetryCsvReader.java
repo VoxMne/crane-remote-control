@@ -70,11 +70,39 @@ public final class TelemetryCsvReader {
         }
     }
 
+    /** The `#` metadata a v2 recording carries, as key/value pairs in file order. */
+    private final Map<String, String> metadata = new LinkedHashMap<>();
+
+    /**
+     * Metadata from the last {@link #read}: profile id and name, operator, when it
+     * was recorded, and one entry per axis with its unit and travel. Empty for a v1
+     * recording, which carried nothing but numbers.
+     */
+    public Map<String, String> metadata() {
+        return Map.copyOf(metadata);
+    }
+
     public Recording read(Path file) throws IOException {
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
-        if (lines.isEmpty()) {
+        metadata.clear();
+
+        // Skip and collect the metadata block, so a v2 recording reads on a reader
+        // that only wants the numbers and a v1 recording still reads here.
+        int headerIndex = 0;
+        while (headerIndex < lines.size() && lines.get(headerIndex).startsWith("#")) {
+            String entry = lines.get(headerIndex).substring(1).trim();
+            int equals = entry.indexOf('=');
+            if (equals > 0) {
+                metadata.merge(entry.substring(0, equals).trim(),
+                        entry.substring(equals + 1).trim(),
+                        (existing, added) -> existing + "; " + added);
+            }
+            headerIndex++;
+        }
+        if (headerIndex >= lines.size()) {
             return new Recording(List.of());
         }
+        lines = lines.subList(headerIndex, lines.size());
 
         List<String> header = Arrays.asList(lines.get(0).split(","));
         List<String> axisIds = new ArrayList<>();

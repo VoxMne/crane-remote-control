@@ -33,7 +33,7 @@ class TelemetryCsvLoggerTest {
                     true, false, true, List.of("E-STOP latched", "slew at limit")));
         }
 
-        List<String> lines = Files.readAllLines(file);
+        List<String> lines = dataLines(file);
         assertEquals(3, lines.size());
         assertEquals("timestampMillis,pos_slew,vel_slew,pos_boom,vel_boom,pos_jib,vel_jib,"
                 + "pos_extension,vel_extension,pos_winch,vel_winch,"
@@ -50,7 +50,7 @@ class TelemetryCsvLoggerTest {
         logger.accept(CraneState.initial(profile));
         logger.close();
         logger.accept(CraneState.initial(profile)); // must not throw
-        assertEquals(2, Files.readAllLines(file).size());
+        assertEquals(2, dataLines(file).size());
     }
 
     @Test
@@ -60,7 +60,18 @@ class TelemetryCsvLoggerTest {
         try (TelemetryCsvLogger logger = new TelemetryCsvLogger(file, profile)) {
             logger.accept(CraneState.initial(profile));
         }
-        String dataRow = Files.readAllLines(file).get(1);
+        String dataRow = dataLines(file).get(1);
         assertTrue(dataRow.contains("0.0000"), "expected dot-decimal numbers: " + dataRow);
+    }
+
+    /**
+     * The CSV proper: metadata lines start with '#' and are the reader's business,
+     * not these tests'. Added when recordings became self-describing so they could
+     * be marked and checked against their profile a week later.
+     */
+    private static List<String> dataLines(Path file) throws IOException {
+        return Files.readAllLines(file).stream()
+                .filter(line -> !line.startsWith("#"))
+                .toList();
     }
 }

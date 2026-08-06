@@ -8,6 +8,7 @@ import com.vukotic.crane.core.assist.AutoSequencer;
 import com.vukotic.crane.core.driver.CraneDriver;
 import com.vukotic.crane.core.model.CraneState;
 import com.vukotic.crane.core.telemetry.TelemetryCsvLogger;
+import com.vukotic.crane.core.telemetry.SessionSummary;
 import com.vukotic.crane.core.telemetry.TelemetryCsvReader;
 import com.vukotic.crane.driver.serial.SerialCraneDriver;
 import com.vukotic.crane.driver.serial.SerialPorts;
@@ -1842,6 +1843,34 @@ public final class CraneRemoteApp extends Application {
     private volatile boolean replaying;
 
     /**
+     * Puts the run's provenance and its marking summary into the event log.
+     *
+     * <p>This is the assessment artifact. The recording proves what the trainee did;
+     * these numbers say how well — emergency stops tripped, limits driven into, how
+     * much of the session was spent actually moving, and how smoothly the controls
+     * were handled. Deliberately not a grade: it counts events and leaves the line
+     * between pass and fail to the instructor, because that line moves by course.
+     */
+    private void reportSession(TelemetryCsvReader reader,
+                               TelemetryCsvReader.Recording played) {
+        Map<String, String> meta = reader.metadata();
+        if (meta.isEmpty()) {
+            recordEvent("Recording carries no profile metadata "
+                    + "(made before recordings became self-describing)");
+        } else {
+            recordEvent("Run: %s on %s%s".formatted(
+                    meta.getOrDefault("operator", "unnamed operator"),
+                    meta.getOrDefault("craneName", meta.getOrDefault("profile", "?")),
+                    meta.containsKey("recorded") ? ", " + meta.get("recorded") : ""));
+        }
+        for (String line : SessionSummary.of(played).describe().split("\\R")) {
+            if (!line.isBlank()) {
+                recordEvent(line);
+            }
+        }
+    }
+
+    /**
      * Plays a recorded run back through the views. Nothing is simulated: the
      * frames come straight from the CSV, so a laptop with no crane and no
      * simulator can show exactly what a machine did on site.
@@ -1892,7 +1921,8 @@ public final class CraneRemoteApp extends Application {
      */
     private void beginReplay(Path file) {
         try {
-            recording = new TelemetryCsvReader().read(file);
+            TelemetryCsvReader reader = new TelemetryCsvReader();
+            recording = reader.read(file);
             if (recording.isEmpty()) {
                 recordEvent("Recording " + file.getFileName() + " has no usable frames");
                 recording = null;
@@ -1909,6 +1939,10 @@ public final class CraneRemoteApp extends Application {
             dismissWelcome();
             showCaption("Replaying " + file.getFileName() + " ("
                     + (recording.durationMillis() / 1000) + " s of recorded motion)");
+            // The marker's view of the run, alongside the playback. This is what a
+            // training session is actually assessed on — the recording proves what
+            // happened, the summary says whether it was done well.
+            reportSession(reader, recording);
         } catch (IOException e) {
             recordEvent("Could not read recording: " + e.getMessage());
             recording = null;
