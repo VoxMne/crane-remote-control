@@ -132,6 +132,13 @@ public final class SafetyController {
     /**
      * Runs one safety pass.
      *
+     * <p><b>Advisory for real hardware.</b> Rule 6 below stops an axis at the limits
+     * its <em>profile</em> declares, from position feedback that may be up to a
+     * telemetry period old. On a physical machine the authority is the firmware,
+     * which reads its own encoders every control period — see docs/PROTOCOL.md §0.
+     * This check catches a wrong profile and drives the alarm list; it is not what
+     * stands between the machine and its stops.
+     *
      * @param command    the command to filter, after any assist shaping
      * @param rawCommand the operator's unshaped command, used <b>only</b> to judge
      *                   whether a reset is allowed. Assists can zero a held control

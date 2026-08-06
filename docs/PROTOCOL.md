@@ -1,35 +1,62 @@
-# Crane Serial Protocol v1 (CSP/1)
+# Crane Serial Protocol v2 (CSP/2)
 
-> ## What this protocol is not
->
-> **CSP is a control link, not a safety system, and passing its handshake is not
-> commissioning.** Read this before wiring it to anything that moves.
->
-> - It binds nothing but axis *names* and *declared travel*. It does not verify
->   crane identity, units, demand-to-actuator scaling, velocities, or geometry. A
->   crane reporting degrees while the profile means millimetres passes cleanly.
-> - Host-side limit enforcement over telemetry as slow as 10 Hz **cannot** guarantee
->   physical travel limits or stopping distance. A 100 ms feedback gap at full speed
->   is a long way on a real axis. The host stops the crane late, by design, because
->   it is the wrong place to be doing this.
-> - The only mandatory firmware protection here is a watchdog. That is enough to
->   stop a runaway when the link dies; it is not enough to keep an axis inside its
->   mechanical stops.
->
-> **The travel limits, the end stops, and the emergency stop belong on the machine.**
-> The firmware should enforce its own limits and refuse demands that would exceed
-> them, and the emergency stop should remove motor power through hardware that does
-> not depend on any processor agreeing to it. Treat the limits this host enforces as
-> a second opinion and an operator convenience, never as the thing standing between
-> the machine and its stops.
->
-> ## Revision 1.1
->
-> The `HI` handshake now carries each axis's declared travel (§3.2),
-> and the host's telemetry gate is specified rather than left to the driver (§4). Both
-> changes exist because CSP puts position-limit enforcement on the host, which only works
-> if the host can (a) prove the loaded profile matches the machine and (b) tell when it
-> has stopped being able to see it. Firmware written against 1.0 needs its `HI` line
+## 0. Where safety lives
+
+**The machine defends itself. The host is an operator interface.**
+
+This is the single most important thing in this document, and it is a reversal of
+CSP/1. Read it before writing a line of firmware.
+
+| Responsibility | Owner | Why |
+|---|---|---|
+| Emergency stop | **Hardware.** A contactor or safety relay that removes motor power. | It has to work when every processor is wrong, hung, or unpowered. |
+| Travel limits, end stops | **Firmware.** | It reads the encoders in real time. The host sees them at 10–50 Hz over a link that can drop. |
+| Stopping distance, deceleration | **Firmware.** | Only the machine knows its own inertia, and only it can react within a control period. |
+| Deadman / hold-to-run timeout | **Firmware watchdog.** | Loss of the host must stop motion whether or not the host noticed. |
+| Which axes exist, what they mean, operator intent | Host | This is an HMI problem. |
+| Limits as a *second opinion*, alarms, logging | Host | Useful, and never the last line. |
+
+CSP/1 put position-limit enforcement on the host. That was wrong, and it does not
+become right by making the host more careful. A 100 ms feedback gap at full speed
+is a long way on a real axis: the host necessarily stops the crane *late*. It
+remains the wrong place to be doing this no matter how good the software is.
+
+So in CSP/2 the host's limit checking stays — it catches profile mistakes, it
+drives the alarm list, it stops nonsense reaching the wire — but it is explicitly
+**advisory**. If the firmware relies on it, the machine is unsafe.
+
+### The emergency stop is not in this protocol
+
+There is no E-STOP message, and there will not be one. An emergency stop that
+travels as a serial line can be lost, delayed, corrupted, or ignored by a hung
+processor — every property an emergency stop must not have.
+
+Wire the mushroom button into the motor supply through a contactor or safety
+relay, so that pressing it removes power regardless of what any firmware or host
+believes. The firmware should *notice* the resulting state and report it (§3.4),
+but noticing is all it does. Zero demands remain the normal stop; they are not the
+emergency one.
+
+> **Not a safety certification.** Conforming to CSP/2 does not make a machine
+> compliant with anything. It binds axis names and declared travel — not identity,
+> units, demand-to-actuator scaling, velocities, or geometry. A crane reporting
+> degrees while the profile means millimetres passes this handshake cleanly. Whether
+> your machine may be sold or used is a risk-assessment and conformity question,
+> and this document is not an input to it.
+
+## Revision history
+
+**CSP/2.0** — safety responsibility inverted (§0). Firmware limit enforcement is
+mandatory; the host's is advisory. Telemetry gains per-axis inhibit flags (§3.4) so
+the operator can see when the machine, not the host, stopped an axis. `HI` gains a
+capability field (§3.2) so a host can refuse a crane that does not enforce its own
+limits.
+
+**CSP/1.1** — the `HI` handshake carries each axis's declared travel (§3.2),
+and the host's telemetry gate is specified rather than left to the driver (§4). Both
+changes exist because CSP/1 put position-limit enforcement on the host, which only works
+if the host can (a) prove the loaded profile matches the machine and (b) tell when it
+has stopped being able to see it. Firmware written against 1.0 needs its `HI` line
 > extended and its `T` lines to carry every axis; nothing else changes.
 
 Line-based ASCII protocol between the host (crane-remote-control, module
@@ -145,10 +172,21 @@ D 00042 slew:0.500 boom:-0.250 winch:0.000 *10
   > Firmware should not rely on the host getting this right. Treat any axis you have not
   > been given a demand for in the last watchdog period as commanded to zero.
 
-**Safety on the wire.** Demands are already safety-filtered by the host core (E-STOP
-latch, deadman, watchdog, clamping, ramp limiting all run host-side). The protocol
-therefore carries **no deadman or E-STOP flags in v1 — zero demands ARE the stop**.
-The firmware needs exactly one safety behavior of its own, see §4.
+**Safety on the wire.** Demands arrive already filtered by the host (E-STOP latch,
+deadman, watchdog, clamping, ramp limiting). The protocol carries **no deadman or
+E-STOP flags — zero demands are the normal stop**, and the emergency one is
+hardware (§0).
+
+None of that host-side filtering is a reason for firmware to trust a demand. Treat
+every `D` line as a *request from an untrusted peer*:
+
+- **Clamp it to what this axis can physically do.** The host may have the wrong
+  profile loaded; §3.2 makes that unlikely, not impossible.
+- **Refuse it if it drives an axis past its own limit**, using your encoders, in
+  your control period. Report the refusal in telemetry (§3.4) rather than silently
+  ignoring it, so the operator learns why the machine will not move.
+- **Decelerate within your own stopping distance** as a limit approaches. The host's
+  ramp limiter shapes the operator's *intent*; it knows nothing about your inertia.
 
 ### 3.4 `T <seq> <axis>:<position>,<velocity> ...` — crane → host (telemetry)
 
@@ -165,6 +203,19 @@ T 00042 slew:12.50,1.20 boom:45.00,0.00 *64
   profile's `AxisSpec`** (e.g. degrees and deg/s for a slew axis). Any decimal precision
   is accepted; two decimals are plenty.
 - Unknown axis ids are ignored, and extra axes do not invalidate a line.
+- An axis id may carry a trailing **inhibit flag**: `slew:12.50,1.20,L`. The letter
+  says why the firmware is holding that axis, and is how the operator finds out that
+  the *machine* stopped it rather than the host:
+
+  | Flag | Meaning |
+  |---|---|
+  | *(absent)* | Free to move. |
+  | `L` | At or past a firmware travel limit; motion outward is refused. |
+  | `E` | Emergency stop active — motor power is removed (§0). |
+  | `F` | Axis fault: encoder, driver, thermal, overcurrent. |
+
+  A host that does not understand the flag must ignore it and still accept the
+  sample, so this is backwards compatible with a CSP/1 reader.
 - **A `T` line that omits a profile axis is not accepted as position feedback.** It is
   dropped and counted, and the previous positions stand. Earlier revisions let missing
   axes keep their old values while still refreshing the freshness timer, which meant
@@ -175,8 +226,15 @@ T 00042 slew:12.50,1.20 boom:45.00,0.00 *64
 
 - **Firmware watchdog (mandatory):** if no valid `D` line has arrived within **250 ms**,
   the firmware must force all its outputs to zero (stop all motion) until valid `D`
-  lines resume. This covers unplugged cables, host crashes, and wedged UARTs. It is the
-  only safety logic required firmware-side.
+  lines resume. This covers unplugged cables, host crashes, and wedged UARTs.
+- **Firmware limit enforcement (mandatory, CSP/2):** the firmware refuses any demand
+  that would take an axis past its own travel, using its own position feedback, and
+  decelerates in time to stop within its own stopping distance. It reports the refusal
+  with the `L` flag (§3.4). This is not shared with the host — the host's identical
+  check is a second opinion that arrives up to 100 ms late.
+- **Emergency stop (mandatory, hardware):** outside this protocol entirely. Motor power
+  is removed by a contactor or safety relay that does not depend on firmware or host
+  agreeing. Firmware reports the state with the `E` flag; it does not implement it.
 - **Host gate (mandatory, host-side):** the host transmits nonzero demands **only** while
   it holds usable position feedback — a complete, sequence-advancing `T` line newer than
   **250 ms**. Otherwise every `D` line carries zeros. Without feedback the host cannot
@@ -222,6 +280,15 @@ why a partial line is unsafe in each direction.
    [-1.000, +1.000] or malformed number → drop the whole line. Otherwise store demands
    (unknown axes ignored), remember the sequence number, and pet the watchdog.
 6. Watchdog: if >250 ms since the last valid `D`, drive all outputs to zero.
+6a. **Enforce your own travel limits** from your own encoders, every control period.
+   Refuse outward demands at a limit, allow inward ones, and begin decelerating far
+   enough out that you stop before the stop. Do not assume the host has done this;
+   assume it has the wrong profile loaded and is 100 ms behind.
+6b. **Report why you are holding an axis** with the `L`/`E`/`F` flags in §3.4. An
+   operator watching a machine refuse to move with no explanation will keep pulling
+   the lever.
+6c. **The emergency stop is not your job to implement** — it is a contactor in the
+   motor supply. Your job is to notice it and say so.
 7. Send `T <lastDSeq> <axis>:<pos>,<vel> ...` at 10–50 Hz, physical units, `.` decimal
    point, and append the checksum (`sprintf("*%02X", x)`). Include **every** axis the
    host's profile declares, and make sure `<lastDSeq>` advances — the host rejects

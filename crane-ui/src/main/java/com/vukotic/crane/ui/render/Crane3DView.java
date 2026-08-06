@@ -88,8 +88,17 @@ public final class Crane3DView implements CraneSceneView {
     private static final double BED_HALF_WIDTH = 1.2;
     private static final double BED_CENTRE_X = (BED_FRONT_X + BED_REAR_X) / 2;
     private static final double BED_LENGTH = BED_REAR_X - BED_FRONT_X;
-    /** Headboard: a 0.12 m thick, 0.9 m tall wall standing at the rear of the deck. */
-    private static final double HEADBOARD_TOP_Y = -(BED_HEIGHT + 0.9);
+    /**
+     * How far above the deck a load is still steered onto it.
+     *
+     * <p>This used to be the top of the headboard, which the crane could reach
+     * through and which has been removed from the truck. The flatbed still needs a
+     * rule, though: without one a load simply comes to rest wherever the hook left
+     * it, including hanging off the back with nothing underneath. A hand's breadth
+     * above the deck is where a load is committed to landing on it.
+     */
+    private static final double DECK_APPROACH_Y = -(BED_HEIGHT + 0.25);
+    /** Rear edge of the planks. Was the headboard's face, before it was removed. */
     private static final double DECK_REAR_LIMIT = BED_REAR_X - 0.06;
     /** Loads may not be set down inside this radius of the mast. */
     private static final double MAST_KEEP_OUT_RADIUS = 0.95;
@@ -940,8 +949,8 @@ public final class Crane3DView implements CraneSceneView {
 
     /**
      * Where a load of half-length {@code halfX} may stand on the deck: clear of the
-     * mast at the front and of the headboard at the rear. A load too long for the
-     * deck goes to the middle, which is the least wrong place for it.
+     * mast at the front, and fully on the planks at the rear. A load too long for
+     * the deck goes to the middle, which is the least wrong place for it.
      */
     static double clampOntoDeckX(double centreX, double halfX) {
         double minX = MAST_KEEP_OUT_RADIUS + halfX;
@@ -952,22 +961,21 @@ public final class Crane3DView implements CraneSceneView {
     /**
      * Keeps a load clear of the truck's own structure.
      *
-     * <p>Out of the mast, as before: inside the keep-out cylinder the load is
-     * nudged radially outwards, which is what a banksman would do with a tag line.
+     * <p>Out of the mast: inside the keep-out cylinder the load is nudged radially
+     * outwards, which is what a banksman would do with a tag line.
      *
-     * <p>And, once it is low enough to foul them, inside the deck. A load was
-     * previously set down centred wherever the hook happened to be, with nothing
-     * checking that it actually fitted: a boat lowered near the back of the bed
-     * came to rest with its stern driven straight through the headboard and
-     * hanging in the air past the end of the truck. Below the headboard the
-     * footprint is therefore steered into the usable deck rectangle — clear of the
-     * mast at the front, of the headboard at the rear, and of the side rails.
+     * <p>And, once it is close enough to the deck to be landing on it, fully onto
+     * it. A load was previously set down centred wherever the hook happened to be,
+     * with nothing checking that it fitted — a boat lowered near the back of the bed
+     * came to rest with most of its length hanging in the air past the end of the
+     * truck. The footprint is therefore steered into the usable deck rectangle:
+     * clear of the mast at the front, on the planks at the rear, inside the rails.
      */
     private Point3D keepClearOfTruck(Point3D world, double slewDeg) {
         Point3D local = worldToVehicle(world);
 
-        // Low enough to hit the headboard or the rails, and heading for the deck.
-        if (local.getY() > HEADBOARD_TOP_Y && isOverBed(local.getX(), local.getZ())) {
+        // Close enough to the deck to be landing on it, and over it.
+        if (local.getY() > DECK_APPROACH_Y && isOverBed(local.getX(), local.getZ())) {
             double x = clampOntoDeckX(local.getX(), loadHalfExtentX(slewDeg));
             double limitZ = Math.max(0.0, BED_HALF_WIDTH - loadHalfExtentZ(slewDeg));
             double z = Math.clamp(local.getZ(), -limitZ, limitZ);
@@ -1305,10 +1313,6 @@ public final class Crane3DView implements CraneSceneView {
             rail.setTranslateZ(railZ);
             truck.getChildren().add(rail);
         }
-        Box headboard = new Box(0.12, 0.9, BED_HALF_WIDTH * 2);
-        headboard.setMaterial(dark);
-        headboard.setTranslateX(BED_REAR_X);
-        headboard.setTranslateY(-(BED_HEIGHT + 0.45));
 
         Box chassis = new Box(BED_LENGTH + 2.8, 0.22, 1.1);
         chassis.setMaterial(dark);
@@ -1344,7 +1348,7 @@ public final class Crane3DView implements CraneSceneView {
         beacon.setTranslateX(CAB_CENTRE_X);
         beacon.setTranslateY(-2.4);
 
-        truck.getChildren().addAll(chassis, bed, headboard, cab, windscreen, exhaust, beacon);
+        truck.getChildren().addAll(chassis, bed, cab, windscreen, exhaust, beacon);
 
         // Outriggers: the legs a loader crane drops before lifting.
         for (double outriggerZ : new double[]{-1.35, 1.35}) {
