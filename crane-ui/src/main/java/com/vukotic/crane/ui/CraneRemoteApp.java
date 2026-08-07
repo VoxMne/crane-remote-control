@@ -200,6 +200,8 @@ public final class CraneRemoteApp extends Application {
     private CraneSceneView activeView;
     private StackPane viewStack;
     private boolean use3d;
+    /** Rewrites the caption under the 2D/3D toggle when the view changes. */
+    private Runnable viewNoteRefresh = () -> { };
     /** 3D camera/cargo choices: kept here so they survive profile switches. */
     private CameraMode cameraChoice = CameraMode.ORBIT;
     private ComboBox<CameraMode> cameraSelector;
@@ -1075,41 +1077,15 @@ public final class CraneRemoteApp extends Application {
 
     /** Keeps the header pill honest about what the machine is doing. */
     private void updateStatusPill(CraneState state) {
-        String text;
-        String style;
-        // The latch is read from the LIVE machine, never from `state`: while a
-        // recording is on screen `state` carries the recording's flags, and the
-        // header would happily report the past as the present.
-        boolean liveLatched = backend.latestState().estopLatched();
-        if (liveLatched) {
-            // Ahead of everything else, replay included: a latched machine is the
-            // most important thing this header can say. The HMI used to be able to
-            // show a green RUN ENABLED beside a latched E-STOP.
-            text = "E-STOP LATCHED";
-            style = "pill-alarm";
-        } else if (replaying) {
-            text = "REPLAY — RECORDED";
-            style = "pill-warn";
-        } else if (demoRunning) {
-            text = "DEMO RUNNING";
-            style = "pill-warn";
-        } else if (driverMode) {
-            text = "DRIVER MODE";
-            style = "pill-warn";
-        } else if (backend.isCollisionBlocking()) {
-            text = "BLOCKED — OBSTACLE";
-            style = "pill-warn";
-        } else if (state.deadmanHeld()) {
-            text = "RUNNING";
-            style = "pill-ok";
-        } else {
-            text = "READY — HOLD SPACE";
-            style = "pill-idle";
-        }
-        if (!text.equals(statusPill.getText())) {
-            statusPill.setText(text);
+        // Decided in HmiState, which is plain values and has tests. The LIVE state
+        // goes in, never `state`: while a recording is on screen `state` carries
+        // the recording's flags and the header would report the past as the present.
+        HmiState.Pill pill = new HmiState(backend.latestState(), replaying, demoRunning,
+                driverMode, backend.isCollisionBlocking()).pill();
+        if (!pill.text().equals(statusPill.getText())) {
+            statusPill.setText(pill.text());
             statusPill.getStyleClass().removeIf(s -> s.startsWith("pill-"));
-            statusPill.getStyleClass().add(style);
+            statusPill.getStyleClass().add(pill.styleClass());
         }
         headerSubtitle.setText(profile.name() + "  ·  " + backend.driverName());
     }
@@ -1471,12 +1447,31 @@ public final class CraneRemoteApp extends Application {
             viewStack.getChildren().set(0, activeView.node());
             btn2d.setStyle(viewToggleStyle(!use3d));
             btn3d.setStyle(viewToggleStyle(use3d));
+            viewNoteRefresh.run();
         });
+
+        // Which view an operator should believe. The 2D schematic is drawn from the
+        // axis positions and is dimensionally accurate; the 3D scene is a visual
+        // aid whose contact handling is still approximate — loads and structure can
+        // still overlap in poses nobody has hit yet. Saying so in the window beats
+        // an instructor discovering it in front of a class.
+        Label viewNote = new Label();
+        viewNote.getStyleClass().add("caption");
+        viewNote.setWrapText(true);
+        viewNote.setMaxWidth(320);
+        Runnable refreshNote = () -> viewNote.setText(HmiState.viewNote(use3d));
+        refreshNote.run();
+        viewNoteRefresh = refreshNote;
 
         HBox toggleBar = new HBox(6, btn2d, btn3d);
         toggleBar.setPadding(new Insets(8));
         toggleBar.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
         toggleBar.setPickOnBounds(false);
+
+        VBox toggleColumn = new VBox(4, toggleBar, viewNote);
+        toggleColumn.setPadding(new Insets(0, 0, 0, 8));
+        toggleColumn.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
+        toggleColumn.setPickOnBounds(false);
 
         demoCaption = new Label();
         demoCaption.getStyleClass().add("demo-caption");
@@ -1485,9 +1480,9 @@ public final class CraneRemoteApp extends Application {
         demoCaption.setVisible(false);
         demoCaption.setMouseTransparent(true);
 
-        StackPane center = new StackPane(viewStack, toggleBar, demoCaption);
+        StackPane center = new StackPane(viewStack, toggleColumn, demoCaption);
         // Top-left: the top-right corner belongs to the 2D top-view inset.
-        StackPane.setAlignment(toggleBar, Pos.TOP_LEFT);
+        StackPane.setAlignment(toggleColumn, Pos.TOP_LEFT);
         StackPane.setAlignment(demoCaption, Pos.BOTTOM_CENTER);
         StackPane.setMargin(demoCaption, new Insets(0, 0, 26, 0));
         return center;
@@ -1568,9 +1563,8 @@ public final class CraneRemoteApp extends Application {
         // none, the guard is genuinely absent, and the panel has to say so — a
         // protection the operator believes in but which is watching nothing is
         // worse than no protection at all.
-        Label interference = new Label(backend.hasInterferenceProtection()
-                ? "Interference protection active"
-                : "NO interference protection — this crane has no verified geometry");
+        Label interference =
+                new Label(HmiState.interferenceNote(backend.hasInterferenceProtection()));
         interference.setWrapText(true);
         interference.setStyle("-fx-font-size: 11px; -fx-text-fill: "
                 + (backend.hasInterferenceProtection() ? TEXT_DIM : "#e2a33c") + ";");
@@ -2125,13 +2119,10 @@ public final class CraneRemoteApp extends Application {
         // to read the raw key state, so holding SPACE against a latched E-STOP lit
         // a green RUN ENABLED beside it — the machine was going nowhere and the HMI
         // said otherwise.
-        boolean running = live.deadmanHeld() && !live.estopLatched();
-        deadmanIndicator.setStyle(deadmanStyle(running));
-        if (live.estopLatched()) {
-            deadmanIndicator.setText("E-STOP LATCHED — PRESS RESET");
-        } else {
-            deadmanIndicator.setText(running ? "RUN ENABLED" : "HOLD SPACE TO RUN");
-        }
+        HmiState hmi = new HmiState(live, replaying, demoRunning, driverMode,
+                backend.isCollisionBlocking());
+        deadmanIndicator.setStyle(deadmanStyle(hmi.running()));
+        deadmanIndicator.setText(hmi.deadmanText());
 
         if (!alarmItems.equals(state.activeAlarms())) {
             alarmItems.setAll(state.activeAlarms());
