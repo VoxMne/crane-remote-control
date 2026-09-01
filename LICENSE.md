@@ -12,9 +12,9 @@ Copyright © 2026 Vojislav Vukotić. All rights reserved.
 ## You may not, without written permission
 
 - **Sell it**, or charge for the software itself.
-- **Bundle it with hardware you sell.** The software is the companion to the crane
-  rigs sold by the copyright holder; shipping it alongside a competing product is
-  the one use this licence exists to prevent.
+- **Bundle it with hardware or a product you sell**, or ship it as part of a
+  commercial offering, without a separate agreement. Using it to teach is free;
+  making it part of something you charge for is a conversation.
 - **Modify and redistribute it**, or distribute derived works.
 - **Remove or alter** the copyright notices, the product name, or the safety
   statements in the application and its documentation.

@@ -1,13 +1,14 @@
 # Crane Remote Control
 
-**A desktop crane operator training system.** Java 21 + JavaFX operator HMI with the same
+**A free crane control simulator, for training.** Java 21 + JavaFX operator HMI with the same
 controls and the same safety discipline as a real knuckle-boom loader crane: latching
 emergency stop, hold-to-run deadman, command watchdog, position limits and interference
 protection.
 
-Runs against a built-in simulator today, or a physical desktop crane over a serial link
-speaking CSP/2 (`docs/PROTOCOL.md`). The machine is described by a JSON profile rather
-than by code, so the same software teaches a three-axis rig or a five-axis one.
+Runs against a built-in simulator. A serial driver speaking CSP/2 (`docs/PROTOCOL.md`) is
+implemented for connecting real hardware, but has never been used against a physical
+machine. The crane is described by a JSON profile rather than by code, so the same software
+teaches a three-axis machine or a five-axis one.
 
 **Why it is worth using for training:** every session can be recorded and replayed, and a
 recording carries its own provenance — which crane, which trainee, when, in what units —
