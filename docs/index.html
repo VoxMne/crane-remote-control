@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crane Remote Control — desktop crane operator training</title>
+<meta name="description" content="Desktop crane operator training software: real safety semantics, session recording and assessment. Free download for Windows.">
+<style>
+  :root{
+    --bg:#0f151b; --panel:#161e26; --line:#243039;
+    --text:#e6edf3; --dim:#93a4b3; --amber:#e8b716; --ok:#3fb950;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:940px;margin:0 auto;padding:0 22px}
+  header{padding:64px 0 40px;border-bottom:1px solid var(--line)}
+  h1{margin:0 0 10px;font-size:38px;line-height:1.15;letter-spacing:-.5px}
+  .tag{color:var(--amber);font-weight:600;letter-spacing:.4px;
+       text-transform:uppercase;font-size:13px;margin-bottom:14px}
+  .lede{color:var(--dim);font-size:19px;max-width:640px;margin:0}
+  .btns{display:flex;flex-wrap:wrap;gap:12px;margin:32px 0 10px}
+  .btn{display:inline-block;padding:13px 22px;border-radius:7px;text-decoration:none;
+       font-weight:600;border:1px solid var(--amber);color:#0f151b;background:var(--amber)}
+  .btn.alt{background:transparent;color:var(--amber)}
+  .btn:hover{filter:brightness(1.08)}
+  .note{color:var(--dim);font-size:14px;margin:6px 0 0}
+  section{padding:44px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:23px;margin:0 0 16px}
+  h3{font-size:16px;margin:22px 0 6px}
+  p{margin:0 0 14px}
+  ul{margin:0 0 14px;padding-left:20px} li{margin:6px 0}
+  img{width:100%;border:1px solid var(--line);border-radius:8px;display:block;margin:18px 0 8px}
+  figcaption{color:var(--dim);font-size:14px;margin-bottom:26px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;margin-top:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px}
+  .card h3{margin-top:0}
+  .warn{background:#1d1a12;border:1px solid #4a3d16;border-radius:8px;padding:18px 20px}
+  .warn strong{color:var(--amber)}
+  code{background:var(--panel);border:1px solid var(--line);border-radius:4px;
+       padding:1px 6px;font-size:14px}
+  footer{padding:34px 0 60px;color:var(--dim);font-size:14px}
+  a{color:var(--amber)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="tag">Desktop crane operator training</div>
+  <h1>Learn to operate a loader crane, at a desk.</h1>
+  <p class="lede">The same controls and the same discipline as a real knuckle-boom crane —
+    latching emergency stop, hold-to-run, watchdog, position limits. Every session records,
+    replays and summarises, so an instructor can mark what actually happened.</p>
+
+  <div class="btns">
+    <a class="btn" href="https://github.com/USER/crane-remote-control/releases/latest">Download for Windows</a>
+    <a class="btn alt" href="https://github.com/USER/crane-remote-control">Source on GitHub</a>
+  </div>
+  <p class="note">Free. No account, no licence key. Windows 10/11, ~43 MB, includes its own Java runtime.</p>
+</header>
+
+<section>
+  <h2>What you get</h2>
+  <div class="cards">
+    <div class="card">
+      <h3>A real safety layer</h3>
+      <p>A latching emergency stop that only a person can clear, hold-to-run, a command
+         watchdog, per-axis position limits and interference protection. The habits it
+         teaches are the ones that transfer.</p>
+    </div>
+    <div class="card">
+      <h3>Assessment, not just practice</h3>
+      <p>Recordings carry their own provenance — which crane, which trainee, when, in what
+         units — and reduce to what gets marked: emergency stops tripped, limits driven
+         into, time actually moving, control smoothness.</p>
+    </div>
+    <div class="card">
+      <h3>Any crane, as data</h3>
+      <p>A crane is a JSON profile, not code. Ships with three; build your own in the app.
+         The same software drives a three-axis bench rig or a five-axis one.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <figure>
+    <img src="img/view2d.png" alt="The 2D schematic view with axis readouts and safety panel">
+    <figcaption>The 2D schematic is dimensionally accurate and drawn from the axis positions —
+      this is the view to teach and measure from.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/view3d.png" alt="The 3D presentation view">
+    <figcaption>The 3D view is for presentation and demonstration. It is marked experimental
+      in the app: parts can still overlap in some poses.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>Try it in five minutes</h2>
+  <ul>
+    <li>Download and run. If Windows shows <em>"Windows protected your PC"</em>, click
+      <strong>More info → Run anyway</strong> — the build is not code-signed yet.</li>
+    <li>If your PC blocks installers, take the <strong>portable ZIP</strong> instead: unzip
+      it anywhere and run <code>CraneRemoteControl.exe</code>. No admin rights needed.</li>
+    <li>Press <strong>Watch the narrated demo</strong> to see a full loading cycle, or
+      <strong>Take the controls</strong> and hold <kbd>SPACE</kbd> to enable motion.</li>
+  </ul>
+</section>
+
+<section>
+  <h2 style="margin-bottom:14px">Before you connect it to anything that moves</h2>
+  <div class="warn">
+    <p><strong>This is training software, not certified safety equipment.</strong> It does not
+      replace supervised time on a real machine.</p>
+    <p>The emergency stop here is a software latch. On any physical rig, the emergency stop
+      must <em>also</em> be a hardware circuit that removes motor power without depending on
+      this software, any firmware, or any processor agreeing to it — and the travel limits
+      must be enforced by the machine itself.</p>
+    <p style="margin-bottom:0">The reasoning is written up in
+      <a href="https://github.com/USER/crane-remote-control/blob/main/docs/PROTOCOL.md">the
+      protocol spec, section 0</a>.</p>
+  </div>
+</section>
+
+<section>
+  <h2>I am looking for instructors to try this</h2>
+  <p>It is being built into a desktop crane you can actually touch. If you teach heavy
+    equipment, mechatronics or crane operation, I would like fifteen minutes of your time:
+    what would have to be true for you to use this in a class, and what is missing?</p>
+  <p><a href="mailto:vukotic.vojislav1@gmail.com">vukotic.vojislav1@gmail.com</a></p>
+</section>
+
+<footer>
+  <div class="wrap" style="padding:0">
+    Crane Remote Control — © 2026 Vojislav Vukotić ·
+    <a href="https://github.com/USER/crane-remote-control/blob/main/LICENSE.md">Licence</a> ·
+    <a href="https://github.com/USER/crane-remote-control/blob/main/docs/USER_GUIDE.md">User guide</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

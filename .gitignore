@@ -26,3 +26,7 @@ crane-ui/telemetry/
 
 # Local build tooling (WiX binaries etc.)
 /tools/
+
+# Release artifacts are attached to GitHub Releases, not committed.
+*.msi
+*.zip

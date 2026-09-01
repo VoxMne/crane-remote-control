@@ -31,7 +31,7 @@ crane over a serial cable instead — nothing else about the program changes.
 ### Option A — Install it (easiest)
 
 1. Go to `crane-ui\build\jpackage\`
-2. Double-click **`CraneRemoteControl-3.7.1.msi`**
+2. Double-click **`CraneRemoteControl-3.8.0.msi`**
 3. Click through the installer (no admin rights needed — it installs for you only)
 4. Start it from the Start menu: **Crane Remote Control**
 
@@ -390,7 +390,7 @@ profile file, the same program drives any crane.
 
 | What | Where |
 |---|---|
-| Installer | `crane-ui\build\jpackage\CraneRemoteControl-3.7.1.msi` |
+| Installer | `crane-ui\build\jpackage\CraneRemoteControl-3.8.0.msi` |
 | Portable app | `crane-ui\build\jpackage\CraneRemoteControl\` |
 | Your own crane profiles | `%LOCALAPPDATA%\CraneRemoteControl\profiles\*.json` (or `profiles\` beside the program if that folder exists) |
 | Telemetry recordings | `%LOCALAPPDATA%\CraneRemoteControl\telemetry\*.csv` (or `telemetry\` beside the program if that folder exists) |
